@@ -8,7 +8,7 @@ const seedSuperAdmin = async () => {
   if (!existing) {
     const superAdmin = new userModel({
       username: 'superadmin',
-      password: 'eVANCE$1997', // Change in production!
+      password: '', // Change in production!
       nationalId: '34038490',
       phone: '254799457182',
       role: 'super_admin',

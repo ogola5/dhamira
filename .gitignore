@@ -37,4 +37,12 @@ lerna-debug.log*
 *.orig
 *.rej
 *.patch
-*.db    
+*.db
+*.sqlite
+*.sqlite3
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
