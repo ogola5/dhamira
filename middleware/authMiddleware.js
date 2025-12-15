@@ -1,6 +1,6 @@
 // middleware/authMiddleware.js
 import jwt from 'jsonwebtoken';
-import userModel from '../models/UserModel.js';
+import userModel from '../models/userModel.js';
 import asyncHandler from 'express-async-handler';
 
 // Protect routes (all management + officers)

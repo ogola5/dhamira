@@ -1,6 +1,6 @@
 // controllers/groupController.js
 import GroupModel from '../models/GroupModel.js';
-import userModel from '../models/UserModel.js';
+import userModel from '../models/userModel.js';
 import asyncHandler from 'express-async-handler';
 
 // @desc    Create a new group
