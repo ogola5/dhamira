@@ -2,6 +2,8 @@
 import LoanModel from '../models/LoanModel.js';
 import GroupModel from '../models/GroupModel.js';
 import ClientModel from '../models/ClientModel.js';
+import CreditAssessmentModel from '../models/CreditAssessmentModel.js';
+import GuarantorModel from '../models/GuarantorModel.js';
 import asyncHandler from 'express-async-handler';
 
 // @desc    Initiate a loan request
@@ -21,6 +23,23 @@ const initiateLoan = asyncHandler(async (req, res) => {
     throw new Error('Client not found');
   }
 
+  // 20% savings rule
+  const principalCents = Math.round(Number(amount) * 100);
+  if (client.savings_balance_cents < principalCents * 0.2) {
+    res.status(400);
+    throw new Error('Client must have at least 20% of loan amount as savings');
+  }
+
+  // Must have repaid at least one previous loan
+  const hasRepaidLoan = await LoanModel.exists({
+    clientId: client._id,
+    status: 'repaid',
+  });
+  if (!hasRepaidLoan) {
+    res.status(400);
+    throw new Error('Client must have successfully repaid a previous loan');
+  }
+
   const group = await GroupModel.findById(client.groupId);
   if (!group || group.signatories.length !== 3) {
     res.status(400);
@@ -31,8 +50,8 @@ const initiateLoan = asyncHandler(async (req, res) => {
     clientId: client._id,
     groupId: client.groupId,
     type,
-    amount,
     term,
+    principal_cents: principalCents,
     initiatedBy: req.user._id,
   });
 
@@ -59,14 +78,34 @@ const approveLoan = asyncHandler(async (req, res) => {
     throw new Error('Cannot approve your own initiated loan');
   }
 
-  loan.approvedBy.push(req.user._id);
+  // Credit assessment must exist
+  const assessment = await CreditAssessmentModel.findOne({ loanId: loan._id });
+  if (!assessment) {
+    res.status(400);
+    throw new Error('Credit assessment is required before approval');
+  }
+
+  // At least one accepted external guarantor
+  const guarantorCount = await GuarantorModel.countDocuments({
+    loanId: loan._id,
+    accepted: true,
+    external: true,
+  });
+
+  if (guarantorCount < 1) {
+    res.status(400);
+    throw new Error('At least one external guarantor is required');
+  }
+
+  if (!loan.approvedBy.includes(req.user._id)) {
+    loan.approvedBy.push(req.user._id);
+  }
+
   loan.status = 'approved';
-  loan.disbursementDate = new Date();
+  loan.approvedAt = new Date();
   await loan.save();
 
-  // TODO: Integrate M-Pesa disbursement here (call mpesaService.disburse(loan.clientId.phone, loan.amount))
-
-  res.json({ message: 'Loan approved and ready for disbursement', loan });
+  res.json({ message: 'Loan approved', loan });
 });
 
 // @desc    Get all loans
@@ -78,6 +117,7 @@ const getLoans = asyncHandler(async (req, res) => {
     .populate('groupId', 'name')
     .populate('initiatedBy', 'username role')
     .populate('approvedBy', 'username role');
+
   res.json(loans);
 });
 

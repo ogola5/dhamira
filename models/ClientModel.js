@@ -1,88 +1,58 @@
-// models/ClientModel.js
 import mongoose from 'mongoose';
 
-const clientSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    required: [true, 'Client name is required'],
-    trim: true,
-  },
-  nationalId: {
-    type: String,
-    required: [true, 'National ID is required'],
-    unique: true,
-    trim: true,
-  },
-  phone: {
-    type: String,
-    required: [true, 'Phone number is required'],
-    trim: true,
-  },
-  photoUrl: {
-    type: String, // Path to uploaded photo
-    required: [true, 'Client photo is required'],
-  },
-  residence: {
-    type: String,
-    enum: ['owned', 'rented'],
-    required: [true, 'Residence type is required'],
-  },
-  businessType: {
-    type: String,
-    required: [true, 'Business type is required'],
-    trim: true,
-  },
-  businessLocation: {
-    type: String,
-    required: [true, 'Business location is required'],
-    trim: true,
-  },
-  nextOfKin: {
-    name: {
-      type: String,
-      required: [true, 'Next of kin name is required'],
-      trim: true,
-    },
-    phone: {
-      type: String,
-      required: [true, 'Next of kin phone is required'],
-      trim: true,
-    },
-    relationship: {
-      type: String,
-      required: [true, 'Relationship with next of kin is required'],
-      trim: true,
-    },
-  },
-  groupId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Group',
-    required: [true, 'Client must belong to a group'],
-  },
-  savingsBalance: {
-    type: Number,
-    default: 0,
-    min: [0, 'Savings balance cannot be negative'],
-  },
-  registrationFeePaid: {
-    type: Boolean,
-    default: false,
-  },
-  initialSavingsPaid: {
-    type: Boolean,
-    default: false,
-  },
-  createdBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+const { Schema } = mongoose;
 
-const ClientModel = mongoose.model('Client', clientSchema);
+function normalizeNationalId(v) {
+  return typeof v === 'string' ? v.trim() : v;
+}
 
-export default ClientModel;
+function normalizePhone(v) {
+  if (typeof v !== 'string') return v;
+  // Minimal normalization: trim spaces. You can enforce E.164 later (+2547...)
+  return v.trim();
+}
+
+const clientSchema = new Schema(
+  {
+    name: { type: String, required: true, trim: true },
+
+    nationalId: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      set: normalizeNationalId,
+      index: true,
+    },
+
+    phone: { type: String, required: true, trim: true, set: normalizePhone },
+
+    photoUrl: { type: String, required: true },
+
+    residence: { type: String, enum: ['owned', 'rented'], required: true },
+
+    businessType: { type: String, required: true, trim: true },
+    businessLocation: { type: String, required: true, trim: true },
+
+    nextOfKin: {
+      name: { type: String, required: true, trim: true },
+      phone: { type: String, required: true, trim: true, set: normalizePhone },
+      relationship: { type: String, required: true, trim: true },
+    },
+
+    groupId: { type: Schema.Types.ObjectId, ref: 'Group', required: true, index: true },
+
+    // Money: store as cents
+    savings_balance_cents: { type: Number, default: 0, min: 0 },
+
+    registrationFeePaid: { type: Boolean, default: false },
+    initialSavingsPaid: { type: Boolean, default: false },
+
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { timestamps: true }
+);
+
+clientSchema.index({ groupId: 1, createdAt: -1 });
+
+export default mongoose.model('Client', clientSchema);

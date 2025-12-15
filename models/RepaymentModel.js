@@ -1,57 +1,34 @@
-// models/RepaymentModel.js
 import mongoose from 'mongoose';
 
-const repaymentSchema = new mongoose.Schema({
-  loanId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Loan',
-    required: [true, 'Repayment must be associated with a loan'],
-  },
-  amount: {
-    type: Number,
-    required: [true, 'Repayment amount is required'],
-    min: [100, 'Minimum repayment amount is 100 KES'],
-  },
-  paymentMethod: {
-    type: String,
-    enum: ['mpesa', 'cash', 'bank_transfer'],
-    default: 'mpesa',
-  },
-  transactionId: {
-    type: String, // e.g., M-Pesa confirmation code
-  },
-  paidBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User', // Loan officer or admin recording it
-    required: true,
-  },
-  notes: {
-    type: String, // Optional feedback or comments for sentiment analysis
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+const { Schema } = mongoose;
 
-// Post-save hook to update loan status/balance
-repaymentSchema.post('save', async function () {
-  const loan = await this.model('Loan').findById(this.loanId);
-  if (!loan) return;
+const repaymentSchema = new Schema(
+  {
+    loanId: { type: Schema.Types.ObjectId, ref: 'Loan', required: true, index: true },
 
-  // Calculate remaining balance (simple: sum all repayments vs repaymentAmount)
-  const repayments = await this.model('Repayment').find({ loanId: loan._id });
-  const totalPaid = repayments.reduce((sum, rep) => sum + rep.amount, 0);
+    // Money in cents
+    amount_cents: { type: Number, required: true, min: 1 },
 
-  if (totalPaid >= loan.repaymentAmount) {
-    loan.status = 'repaid';
-  } else if (new Date() > loan.dueDate && loan.status !== 'defaulted') {
-    loan.status = 'defaulted';
+    paymentMethod: { type: String, enum: ['mpesa', 'cash', 'bank_transfer'], default: 'mpesa' },
+
+    transactionId: { type: String, index: true, sparse: true },
+
+    paidBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+
+    notes: { type: String },
+  },
+  { timestamps: true }
+);
+
+repaymentSchema.index({ loanId: 1, createdAt: -1 });
+
+// Unique only when transactionId exists (prevents duplicate M-Pesa confirmations)
+repaymentSchema.index(
+  { transactionId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { transactionId: { $type: 'string' } },
   }
+);
 
-  await loan.save();
-});
-
-const RepaymentModel = mongoose.model('Repayment', repaymentSchema);
-
-export default RepaymentModel;
+export default mongoose.model('Repayment', repaymentSchema);

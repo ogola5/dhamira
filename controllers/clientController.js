@@ -2,12 +2,6 @@
 import ClientModel from '../models/ClientModel.js';
 import GroupModel from '../models/GroupModel.js';
 import asyncHandler from 'express-async-handler';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-// Get __dirname in ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // @desc    Onboard a new client
 // @route   POST /api/clients/onboard
@@ -40,14 +34,19 @@ const onboardClient = asyncHandler(async (req, res) => {
     !req.file
   ) {
     res.status(400);
-    throw new Error('Please provide all required fields including photo');
+    throw new Error('All fields are required, including client photo');
   }
 
-  // Check if client exists
-  const clientExists = await ClientModel.findOne({ nationalId });
+  // Normalize identifiers
+  const nationalIdClean = nationalId.trim();
+  const phoneClean = phone.trim();
+  const kinPhoneClean = nextOfKinPhone.trim();
+
+  // Ensure client does not already exist
+  const clientExists = await ClientModel.findOne({ nationalId: nationalIdClean });
   if (clientExists) {
-    res.status(400);
-    throw new Error('Client with this national ID already exists');
+    res.status(409);
+    throw new Error('Client with this National ID already exists');
   }
 
   // Verify group exists
@@ -57,39 +56,58 @@ const onboardClient = asyncHandler(async (req, res) => {
     throw new Error('Group not found');
   }
 
-  // Photo path (assuming multer saves to uploads folder)
+  // Prevent duplicate membership (defensive)
+  if (group.members && group.members.length > 0) {
+    const alreadyMember = await ClientModel.exists({
+      _id: { $in: group.members },
+      nationalId: nationalIdClean,
+    });
+    if (alreadyMember) {
+      res.status(409);
+      throw new Error('Client already exists in this group');
+    }
+  }
+
+  // Store relative photo path (served statically)
   const photoUrl = `/uploads/${req.file.filename}`;
 
   const client = await ClientModel.create({
-    name,
-    nationalId,
-    phone,
+    name: name.trim(),
+    nationalId: nationalIdClean,
+    phone: phoneClean,
     photoUrl,
     residence,
-    businessType,
-    businessLocation,
+    businessType: businessType.trim(),
+    businessLocation: businessLocation.trim(),
     nextOfKin: {
-      name: nextOfKinName,
-      phone: nextOfKinPhone,
-      relationship: nextOfKinRelationship,
+      name: nextOfKinName.trim(),
+      phone: kinPhoneClean,
+      relationship: nextOfKinRelationship.trim(),
     },
     groupId,
+    savings_balance_cents: 0, // funded later via M-Pesa / cash
+    registrationFeePaid: false,
+    initialSavingsPaid: false,
     createdBy: req.user._id,
-    // Fees/savings: For now, set to false; update after M-Pesa payment
   });
 
-  // Add client to group members
+  // Attach client to group
   group.members.push(client._id);
   await group.save();
 
-  res.status(201).json(client);
+  res.status(201).json({
+    message: 'Client onboarded successfully',
+    client,
+  });
 });
 
 // @desc    Get all clients
 // @route   GET /api/clients
 // @access  Private
 const getClients = asyncHandler(async (req, res) => {
-  const clients = await ClientModel.find({}).populate('groupId', 'name');
+  const clients = await ClientModel.find({})
+    .populate('groupId', 'name meetingDay meetingTime');
+
   res.json(clients);
 });
 

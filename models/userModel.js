@@ -1,60 +1,54 @@
-// models/userModel.js
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-const userSchema = new mongoose.Schema({
-  username: {
-    type: String,
-    required: [true, 'Username is required'],
-    unique: true,
-    trim: true,
-  },
-  password: {
-    type: String,
-    required: [true, 'Password is required'],
-    minlength: [6, 'Password must be at least 6 characters'],
-  },
-  nationalId: {
-    type: String,
-    required: [true, 'National ID is required'],
-    unique: true,
-    trim: true,
-  },
-  phone: {
-    type: String,
-    required: [true, 'Phone number is required'],
-    trim: true,
-  },
-  role: {
-    type: String,
-    enum: ['super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'],
-    required: [true, 'Role is required'],
-  },
-  regions: [{
-    type: String,
-    trim: true,
-  }],
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+const { Schema } = mongoose;
 
-// Hash password before saving
+function normalizeNationalId(v) {
+  return typeof v === 'string' ? v.trim() : v;
+}
+function normalizePhone(v) {
+  return typeof v === 'string' ? v.trim() : v;
+}
+
+const userSchema = new Schema(
+  {
+    username: { type: String, required: true, unique: true, trim: true, index: true },
+
+    password: { type: String, required: true, minlength: 8 }, // bump to 8 for production
+
+    nationalId: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      set: normalizeNationalId,
+      index: true,
+    },
+
+    phone: { type: String, required: true, trim: true, set: normalizePhone },
+
+    role: {
+      type: String,
+      enum: ['super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'],
+      required: true,
+      index: true,
+    },
+
+    regions: [{ type: String, trim: true }],
+  },
+  { timestamps: true }
+);
+
 userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
-    return next();
-  }
+  if (!this.isModified('password')) return next();
+
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
 });
 
-// Method to compare passwords
 userSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  return bcrypt.compare(enteredPassword, this.password);
 };
 
-const userModel = mongoose.model('User', userSchema);
-
-export default userModel;
+export default mongoose.model('User', userSchema);

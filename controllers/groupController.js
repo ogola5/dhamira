@@ -1,10 +1,9 @@
 // controllers/groupController.js
 import GroupModel from '../models/GroupModel.js';
-import userModel from '../models/userModel.js';
-import ClientModel from '../models/ClientModel.js'; // Import for nationalId lookup
+import userModel from '../models/UserModel.js';
 import asyncHandler from 'express-async-handler';
 
-// @desc    Create a new group (minimal: no signatories required initially)
+// @desc    Create a new group
 // @route   POST /api/groups
 // @access  Private (admins or loan officers)
 const createGroup = asyncHandler(async (req, res) => {
@@ -12,14 +11,13 @@ const createGroup = asyncHandler(async (req, res) => {
 
   if (!name || !meetingDay || !meetingTime || !loanOfficerId) {
     res.status(400);
-    throw new Error('Please provide all required fields including loan officer ID');
+    throw new Error('All fields are required');
   }
 
-  // Check if loan officer exists and has correct role
   const loanOfficer = await userModel.findById(loanOfficerId);
   if (!loanOfficer || loanOfficer.role !== 'loan_officer') {
     res.status(400);
-    throw new Error('Invalid loan officer ID');
+    throw new Error('Invalid loan officer');
   }
 
   const groupExists = await GroupModel.findOne({ name });
@@ -32,17 +30,18 @@ const createGroup = asyncHandler(async (req, res) => {
     name,
     meetingDay,
     meetingTime,
-    signatories: [], // Start empty
     loanOfficer: loanOfficerId,
+    signatories: [],
+    members: [],
     createdBy: req.user._id,
   });
 
   res.status(201).json(group);
 });
 
-// @desc    Update group (e.g., assign new loan officer)
+// @desc    Update group
 // @route   PUT /api/groups/:id
-// @access  Private (super_admin only)
+// @access  Private (super_admin)
 const updateGroup = asyncHandler(async (req, res) => {
   const group = await GroupModel.findById(req.params.id);
   if (!group) {
@@ -50,17 +49,15 @@ const updateGroup = asyncHandler(async (req, res) => {
     throw new Error('Group not found');
   }
 
-  const { loanOfficerId } = req.body;
-  if (loanOfficerId) {
-    const loanOfficer = await userModel.findById(loanOfficerId);
-    if (!loanOfficer || loanOfficer.role !== 'loan_officer') {
+  if (req.body.loanOfficerId) {
+    const officer = await userModel.findById(req.body.loanOfficerId);
+    if (!officer || officer.role !== 'loan_officer') {
       res.status(400);
-      throw new Error('Invalid loan officer ID');
+      throw new Error('Invalid loan officer');
     }
-    group.loanOfficer = loanOfficerId;
+    group.loanOfficer = req.body.loanOfficerId;
   }
 
-  // Allow updating other fields if needed (e.g., meetingDay, etc.)
   if (req.body.meetingDay) group.meetingDay = req.body.meetingDay;
   if (req.body.meetingTime) group.meetingTime = req.body.meetingTime;
 
@@ -68,59 +65,46 @@ const updateGroup = asyncHandler(async (req, res) => {
   res.json(group);
 });
 
-// @desc    Assign signatories to group (from existing members, using national IDs)
+// @desc    Assign signatories to group
 // @route   PUT /api/groups/:id/assign-signatories
 // @access  Private (loan_officer or super_admin)
 const assignSignatories = asyncHandler(async (req, res) => {
-  // Debug logs - remove after fixing
-  console.log('Request method:', req.method);
-  console.log('Content-Type header:', req.headers['content-type']);
-  console.log('Raw req.body:', req.body);
-  console.log('req.body type:', typeof req.body);
+  const { signatoryAssignments } = req.body;
 
-  if (!req.body) {
+  if (!Array.isArray(signatoryAssignments) || signatoryAssignments.length !== 3) {
     res.status(400);
-    throw new Error('Request body is missing or not parsed. Ensure Content-Type: application/json header is set and body is raw JSON.');
+    throw new Error('Exactly 3 signatories are required');
   }
 
-  const group = await GroupModel.findById(req.params.id).populate('members', 'nationalId name phone');
+  const group = await GroupModel.findById(req.params.id).populate('members', 'nationalId');
   if (!group) {
     res.status(404);
     throw new Error('Group not found');
   }
 
-  const { signatoryAssignments } = req.body;
-  if (!signatoryAssignments || !Array.isArray(signatoryAssignments) || signatoryAssignments.length !== 3) {
-    res.status(400);
-    throw new Error('Must assign exactly 3 signatories');
-  }
+  const roles = new Set();
+  const signatories = [];
 
-  // Validate roles and find members by nationalId
-  const newSignatories = [];
-  const roleSet = new Set();
-  for (const assignment of signatoryAssignments) {
-    if (!['chairperson', 'secretary', 'treasurer'].includes(assignment.role)) {
+  for (const { role, memberNationalId } of signatoryAssignments) {
+    if (roles.has(role)) {
       res.status(400);
-      throw new Error('Invalid role');
+      throw new Error('Duplicate signatory role');
     }
-    if (roleSet.has(assignment.role)) {
-      res.status(400);
-      throw new Error('Duplicate roles not allowed');
-    }
-    roleSet.add(assignment.role);
+    roles.add(role);
 
-    const member = group.members.find(m => m.nationalId === assignment.memberNationalId);
+    const member = group.members.find(m => m.nationalId === memberNationalId);
     if (!member) {
       res.status(400);
-      throw new Error(`Member with national ID ${assignment.memberNationalId} not found in group`);
+      throw new Error(`Member ${memberNationalId} not in group`);
     }
-    newSignatories.push({ role: assignment.role, clientId: member._id });
+
+    signatories.push({ role, clientId: member._id });
   }
 
-  group.signatories = newSignatories;
+  group.signatories = signatories;
   await group.save();
 
-  res.json({ message: 'Signatories assigned successfully', group });
+  res.json({ message: 'Signatories assigned', group });
 });
 
 // @desc    Get all groups
@@ -131,7 +115,8 @@ const getGroups = asyncHandler(async (req, res) => {
     .populate('signatories.clientId', 'name phone')
     .populate('loanOfficer', 'username phone regions')
     .populate('members', 'name nationalId phone');
+
   res.json(groups);
 });
 
-export { createGroup, updateGroup, getGroups, assignSignatories };
+export { createGroup, updateGroup, assignSignatories, getGroups };
