@@ -1,16 +1,10 @@
-// routes/loanRoutes.js
 import express from 'express';
-import {
-  initiateLoan,
-  approveLoan,
-  getLoans,
-} from '../controllers/loanController.js';
+import { initiateLoan, approveLoan, getLoans } from '../controllers/loanController.js';
 import { disburseLoan } from '../controllers/disbursementController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-// View loans
 router.get(
   '/',
   protect,
@@ -18,15 +12,13 @@ router.get(
   getLoans
 );
 
-// Initiate loan
 router.post(
   '/initiate',
   protect,
-  restrictTo('initiator_admin', 'loan_officer'),
+  restrictTo('initiator_admin', 'loan_officer', 'super_admin'),
   initiateLoan
 );
 
-// Approve loan
 router.put(
   '/:id/approve',
   protect,
@@ -34,11 +26,11 @@ router.put(
   approveLoan
 );
 
-// 🔥 THIS IS THE DISBURSEMENT ROUTE
+// Disbursement: cash roles + superadmin
 router.post(
   '/:id/disburse',
   protect,
-  restrictTo('super_admin', 'approver_admin'),
+  restrictTo('approver_admin', 'initiator_admin', 'super_admin'),
   disburseLoan
 );
 

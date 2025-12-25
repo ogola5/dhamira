@@ -1,15 +1,10 @@
-import LoanModel from '../models/LoanModel.js';
-import CreditAssessmentModel from '../models/CreditAssessmentModel.js';
-import GuarantorModel from '../models/GuarantorModel.js';
 import asyncHandler from 'express-async-handler';
+import Loan from '../models/LoanModel.js';
+import Transaction from '../models/TransactionModel.js';
+import LedgerEntry from '../models/LedgerEntryModel.js';
 
-// @desc    Disburse loan
-// @route   POST /api/loans/:id/disburse
-// @access  Private (admin)
-const disburseLoan = asyncHandler(async (req, res) => {
-  const loan = await LoanModel.findById(req.params.id)
-    .populate('clientId', 'phone');
-
+export const disburseLoan = asyncHandler(async (req, res) => {
+  const loan = await Loan.findById(req.params.id);
   if (!loan) {
     res.status(404);
     throw new Error('Loan not found');
@@ -17,39 +12,52 @@ const disburseLoan = asyncHandler(async (req, res) => {
 
   if (loan.status !== 'approved') {
     res.status(400);
-    throw new Error('Only approved loans can be disbursed');
+    throw new Error('Loan must be approved before disbursement');
   }
 
-  // Ensure credit assessment exists
-  const assessment = await CreditAssessmentModel.findOne({ loanId: loan._id });
-  if (!assessment) {
-    res.status(400);
-    throw new Error('Credit assessment missing');
-  }
-
-  // Ensure at least one accepted external guarantor
-  const guarantorCount = await GuarantorModel.countDocuments({
+  // Create transaction (B2C OUT)
+  const tx = await Transaction.create({
+    type: 'mpesa_b2c',
+    direction: 'OUT',
+    amount_cents: loan.principal_cents,
+    status: 'pending',
     loanId: loan._id,
-    accepted: true,
-    external: true,
+    initiatedBy: req.user._id,
   });
 
-  if (guarantorCount < 1) {
-    res.status(400);
-    throw new Error('At least one accepted external guarantor required');
-  }
+  // Ledger entries (PENDING)
+  await LedgerEntry.create([
+    {
+      account: 'loans_receivable',
+      direction: 'DEBIT',
+      amount_cents: loan.principal_cents,
+      loanId: loan._id,
+      transactionId: tx._id,
+      entryType: 'disbursement',
+    },
+    {
+      account: 'cash_mpesa',
+      direction: 'CREDIT',
+      amount_cents: loan.principal_cents,
+      loanId: loan._id,
+      transactionId: tx._id,
+      entryType: 'disbursement',
+    },
+  ]);
 
-  // TODO: Integrate M-Pesa B2C here
-  // mpesaService.disburse(loan.clientId.phone, loan.principal_cents)
-
-  loan.status = 'disbursed';
-  loan.disbursedAt = new Date();
+  loan.status = 'disbursement_pending';
+  loan.disbursementTransactionId = tx._id;
   await loan.save();
 
+  /**
+   * HERE:
+   * call Safaricom B2C API (async)
+   * pass tx._id as reference
+   */
+
   res.json({
-    message: 'Loan disbursed successfully',
-    loan,
+    message: 'Disbursement initiated (B2C pending)',
+    loanId: loan._id,
+    transactionId: tx._id,
   });
 });
-
-export { disburseLoan };

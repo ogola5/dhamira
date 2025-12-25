@@ -3,7 +3,22 @@ import jwt from 'jsonwebtoken';
 import userModel from '../models/userModel.js';
 import asyncHandler from 'express-async-handler';
 
-// Protect routes (all management + officers)
+/**
+ * Role groups (single source of truth)
+ */
+export const ROLE_GROUPS = {
+  SUPER_ADMIN: ['super_admin'],
+  ADMINS: ['super_admin', 'initiator_admin', 'approver_admin'],
+  LOAN_OFFICERS: ['loan_officer'],
+  ALL_INTERNAL: [
+    'super_admin',
+    'initiator_admin',
+    'approver_admin',
+    'loan_officer',
+  ],
+};
+
+// Protect routes (attach user context)
 const protect = asyncHandler(async (req, res, next) => {
   let token;
 
@@ -22,7 +37,6 @@ const protect = asyncHandler(async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // IMPORTANT: use `sub`, not `id`
     const user = await userModel
       .findById(decoded.sub)
       .select('-password');
@@ -32,19 +46,19 @@ const protect = asyncHandler(async (req, res, next) => {
       throw new Error('Not authorized, user not found');
     }
 
-    // Attach user context
+    // Attach canonical user context
     req.user = user;
-    req.userRole = decoded.role;      // optional convenience
+    req.userRole = user.role;
     req.userRegions = decoded.regions || [];
 
     next();
-  } catch (err) {
+  } catch {
     res.status(401);
     throw new Error('Not authorized, token invalid');
   }
 });
 
-// Restrict by role (management + officers)
+// Restrict by role
 const restrictTo = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -54,7 +68,7 @@ const restrictTo = (...roles) => {
 
     if (!roles.includes(req.user.role)) {
       res.status(403);
-      throw new Error('Access denied: insufficient permissions');
+      throw new Error('Access denied');
     }
 
     next();

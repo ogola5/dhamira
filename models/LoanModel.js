@@ -6,102 +6,154 @@ const loanSchema = new Schema(
   {
     clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
     groupId: { type: Schema.Types.ObjectId, ref: 'Group', required: true, index: true },
+    branchId: { type: Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
 
-    type: { type: String, enum: ['emergency', 'business', 'school_fees'], required: true },
+    // Product types aligned to your policy doc
+    product: {
+      type: String,
+      enum: ['fafa', 'business'],
+      required: true,
+      index: true,
+    },
 
-    // Money in cents
-    principal_cents: { type: Number, required: true, min: 0 },
-    total_due_cents: { type: Number, required: true, min: 0 },
-    total_paid_cents: { type: Number, default: 0, min: 0 },
-    outstanding_cents: { type: Number, required: true, min: 0 },
-
-    // Term rules:
-    // emergency = weeks (4/5/6)
-    // business/school_fees = months (3-12)
-    term: { type: Number, required: true },
-
-    // Store a normalized rate-per-period (e.g. 0.035 per month, 0.20 flat for emergency)
-    rate_per_period: { type: Number, required: true, min: 0 },
-
-    interest_model: { type: String, enum: ['simple'], default: 'simple' },
-
+    // Loan lifecycle
     status: {
       type: String,
-      enum: ['initiated', 'approved', 'disbursed', 'repaid', 'defaulted'],
+      enum: ['initiated', 'approved', 'disbursement_pending', 'disbursed', 'repaid', 'defaulted', 'cancelled'],
       default: 'initiated',
       index: true,
     },
 
-    applicationFeePaid: { type: Boolean, default: false },
+    // Requested + approved terms
+    principal_cents: { type: Number, required: true, min: 1 },
+    term: { type: Number, required: true, min: 1 }, // FAFA weeks (4-6), Business months (3-12)
+    cycle: { type: Number, required: true, min: 1 }, // 1..4 for business, 1..3 for fafa
 
-    initiatedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    approvedBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    // Pricing
+    interest_model: { type: String, enum: ['simple'], default: 'simple' },
 
-    approvedAt: { type: Date },
-    disbursedAt: { type: Date },
+    // FAFA: 5% per week, Business: 3% per month
+    rate_per_period: { type: Number, required: true, min: 0 },
 
-    dueDate: { type: Date, index: true },
+    // Application fee (LAF)
+    application_fee_cents: { type: Number, required: true, min: 0 },
+    applicationFeePaid: { type: Boolean, default: false, index: true },
 
-    // Optional: cached for convenience (e.g., weekly repayment expectation)
+    // Cached totals (derived from ledger but stored for fast reads)
+    total_due_cents: { type: Number, required: true, min: 0 },
+    total_paid_cents: { type: Number, default: 0, min: 0 },
+    outstanding_cents: { type: Number, required: true, min: 0 },
+
     expected_installment_cents: { type: Number, min: 0 },
+
+    // Dates
+    approvedAt: { type: Date, default: null },
+    disbursedAt: { type: Date, default: null },
+    dueDate: { type: Date, default: null, index: true },
+
+    // Governance / audit trail
+    initiatedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    approvedBy: [{ type: Schema.Types.ObjectId, ref: 'User', index: true }],
+    disbursedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null, index: true },
+
+    // Link to disbursement transaction (B2C)
+    disbursementTransactionId: { type: Schema.Types.ObjectId, ref: 'Transaction', default: null, index: true },
   },
   { timestamps: true }
 );
 
-// Compute rule-based pricing at creation time only.
-// Controllers should set principal_cents from requested amount (KES * 100).
+/**
+ * Policy rules applied on creation.
+ * Controllers set principal_cents, product, term, cycle.
+ * This hook computes pricing fields and basic ranges.
+ */
 loanSchema.pre('validate', function (next) {
   if (!this.isNew) return next();
 
-  const type = this.type;
-  const term = this.term;
   const principal = this.principal_cents;
+  const product = this.product;
+  const term = this.term;
+  const cycle = this.cycle;
 
   if (!Number.isInteger(principal) || principal <= 0) {
     return next(new Error('principal_cents must be a positive integer'));
   }
 
-  let ratePerPeriod;
-  let dueDate;
+  const now = Date.now();
 
-  if (type === 'emergency') {
-    // 2000–10000 KES
-    if (principal < 2000 * 100 || principal > 10000 * 100) {
-      return next(new Error('Emergency loan amount must be between 2000 and 10000 KES'));
-    }
-    if (![4, 5, 6].includes(term)) {
-      return next(new Error('Emergency loan term must be 4, 5, or 6 weeks'));
-    }
-    ratePerPeriod = term === 4 ? 0.20 : term === 5 ? 0.25 : 0.30; // flat over whole term
-    dueDate = new Date(Date.now() + term * 7 * 24 * 60 * 60 * 1000);
-    this.rate_per_period = ratePerPeriod;
+  if (product === 'fafa') {
+    // FAFA cycles: 1: 2k–6k, 2: 7k–8k, 3: 9k–10k
+    const k = principal / 100;
+    const cycleRanges = {
+      1: [2000, 6000],
+      2: [7000, 8000],
+      3: [9000, 10000],
+    };
+    const r = cycleRanges[cycle];
+    if (!r) return next(new Error('FAFA cycle must be 1, 2, or 3'));
+    if (k < r[0] || k > r[1]) return next(new Error(`FAFA cycle ${cycle} amount must be between ${r[0]} and ${r[1]} KES`));
 
-    const totalDue = Math.round(principal * (1 + ratePerPeriod));
+    if (![4, 5, 6].includes(term)) return next(new Error('FAFA term must be 4–6 weeks'));
+
+    // Pricing: 5% per week simple
+    this.rate_per_period = 0.05;
+    const totalDue = Math.round(principal * (1 + this.rate_per_period * term));
     this.total_due_cents = totalDue;
     this.outstanding_cents = totalDue;
-    this.expected_installment_cents = Math.floor(totalDue / term); // weekly-ish
-  } else {
-    // business/school_fees
-    if (principal < 5000 * 100 || principal > 100000 * 100) {
-      return next(new Error('Business/School loan amount must be between 5000 and 100000 KES'));
+
+    // LAF: 4% of applied
+    this.application_fee_cents = Math.round(principal * 0.04);
+
+    this.expected_installment_cents = Math.floor(totalDue / term);
+    this.dueDate = new Date(now + term * 7 * 24 * 60 * 60 * 1000);
+  }
+
+  if (product === 'business') {
+    // Business cycles:
+    // 1: 5k–20k (3/4 months)
+    // 2: 25k–45k (5/6 months) + special rule 25k => 5 months
+    // 3: 50k–75k (6–9 months) + special rule 50k => 6 months
+    // 4: 80k–100k+ (duration based on records; MVP cap at 12 months)
+    const k = principal / 100;
+
+    if (![1, 2, 3, 4].includes(cycle)) return next(new Error('Business cycle must be 1–4'));
+
+    const inRange = (x, a, b) => x >= a && x <= b;
+
+    if (cycle === 1) {
+      if (!inRange(k, 5000, 20000)) return next(new Error('Business cycle 1 amount must be 5,000–20,000 KES'));
+      if (![3, 4].includes(term)) return next(new Error('Business cycle 1 term must be 3 or 4 months'));
     }
-    if (term < 3 || term > 12) {
-      return next(new Error('Business/School loan term must be 3–12 months'));
+    if (cycle === 2) {
+      if (!inRange(k, 25000, 45000)) return next(new Error('Business cycle 2 amount must be 25,000–45,000 KES'));
+      if (![5, 6].includes(term)) return next(new Error('Business cycle 2 term must be 5 or 6 months'));
+      if (k === 25000 && term !== 5) return next(new Error('25,000 KES business loan must be 5 months'));
+    }
+    if (cycle === 3) {
+      if (!inRange(k, 50000, 75000)) return next(new Error('Business cycle 3 amount must be 50,000–75,000 KES'));
+      if (term < 6 || term > 9) return next(new Error('Business cycle 3 term must be 6–9 months'));
+      if (k === 50000 && term !== 6) return next(new Error('50,000 KES business loan must be 6 months'));
+    }
+    if (cycle === 4) {
+      if (k < 80000) return next(new Error('Business cycle 4 amount must be >= 80,000 KES'));
+      if (term < 6 || term > 12) return next(new Error('Business cycle 4 term must be 6–12 months'));
     }
 
-    ratePerPeriod = 0.035; // per month
-    dueDate = new Date(Date.now() + term * 30 * 24 * 60 * 60 * 1000); // approximation
-    this.rate_per_period = ratePerPeriod;
-
-    const totalDue = Math.round(principal * (1 + ratePerPeriod * term)); // simple interest
+    // Pricing: 3% per month simple
+    this.rate_per_period = 0.03;
+    const totalDue = Math.round(principal * (1 + this.rate_per_period * term));
     this.total_due_cents = totalDue;
     this.outstanding_cents = totalDue;
-    this.expected_installment_cents = Math.floor(totalDue / term); // monthly
+
+    // LAF: 4% but fixed 500 for 5k and 10k
+    if (k === 5000 || k === 10000) this.application_fee_cents = 500 * 100;
+    else this.application_fee_cents = Math.round(principal * 0.04);
+
+    this.expected_installment_cents = Math.floor(totalDue / term);
+    this.dueDate = new Date(now + term * 30 * 24 * 60 * 60 * 1000); // OK for MVP
   }
 
   this.total_paid_cents = 0;
-  this.dueDate = dueDate;
-
   next();
 });
 

@@ -1,91 +1,101 @@
-// controllers/repaymentController.js
-import mongoose from 'mongoose';
-import RepaymentModel from '../models/RepaymentModel.js';
-import LoanModel from '../models/LoanModel.js';
 import asyncHandler from 'express-async-handler';
+import Loan from '../models/LoanModel.js';
+import Transaction from '../models/TransactionModel.js';
+import LedgerEntry from '../models/LedgerEntryModel.js';
+import { applyLoanLedger } from '../utils/applyLoanLedger.js';
 
-// @desc    Record a repayment
-// @route   POST /api/repayments
-// @access  Private (loan_officer or admins)
-const recordRepayment = asyncHandler(async (req, res) => {
-  const { loanId, amount, paymentMethod, transactionId, notes } = req.body;
+/**
+ * ============================
+ * M-PESA C2B CALLBACK
+ * ============================
+ * This endpoint is called by Safaricom
+ * DO NOT protect with auth middleware
+ */
+export const mpesaC2BCallback = asyncHandler(async (req, res) => {
+  const {
+    TransID,
+    MSISDN,
+    TransAmount,
+    BillRefNumber,
+  } = req.body;
 
-  if (!loanId || amount === undefined) {
-    res.status(400);
-    throw new Error('Loan ID and amount are required');
+  // BillRefNumber MUST be loanId
+  const loan = await Loan.findById(BillRefNumber);
+  if (!loan) {
+    // Future: route to suspense account
+    return res.sendStatus(200);
   }
 
-  const amountCents = Math.round(Number(amount) * 100);
-  if (!Number.isFinite(amountCents) || amountCents <= 0) {
-    res.status(400);
-    throw new Error('Invalid repayment amount');
-  }
+  // Idempotency check
+  const exists = await Transaction.findOne({ mpesaReceipt: TransID });
+  if (exists) return res.sendStatus(200);
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const amount_cents = Math.round(Number(TransAmount) * 100);
 
-  try {
-    const loan = await LoanModel.findById(loanId).session(session);
-    if (!loan || loan.status !== 'disbursed') {
-      res.status(400);
-      throw new Error('Invalid or non-disbursed loan');
-    }
+  // Record transaction
+  const tx = await Transaction.create({
+    type: 'mpesa_c2b',
+    direction: 'IN',
+    amount_cents,
+    status: 'success',
+    mpesaReceipt: TransID,
+    phone: MSISDN,
+    loanId: loan._id,
+  });
 
-    if (amountCents > loan.outstanding_cents) {
-      res.status(400);
-      throw new Error('Repayment exceeds outstanding balance');
-    }
+  // Ledger entries (double-entry)
+  await LedgerEntry.create([
+    {
+      account: 'cash_mpesa',
+      direction: 'DEBIT',
+      amount_cents,
+      loanId: loan._id,
+      transactionId: tx._id,
+      entryType: 'repayment',
+      status: 'completed',
+    },
+    {
+      account: 'loans_receivable',
+      direction: 'CREDIT',
+      amount_cents,
+      loanId: loan._id,
+      transactionId: tx._id,
+      entryType: 'repayment',
+      status: 'completed',
+    },
+  ]);
 
-    if (paymentMethod === 'mpesa' && transactionId) {
-      const exists = await RepaymentModel.findOne({ transactionId }).session(session);
-      if (exists) {
-        res.status(409);
-        throw new Error('Duplicate M-Pesa transaction');
-      }
-    }
+  // Recalculate loan state
+  await applyLoanLedger(loan._id);
 
-    const [repayment] = await RepaymentModel.create(
-      [{
-        loanId,
-        amount_cents: amountCents,
-        paymentMethod,
-        transactionId,
-        notes,
-        paidBy: req.user._id,
-      }],
-      { session }
-    );
-
-    loan.total_paid_cents += amountCents;
-    loan.outstanding_cents -= amountCents;
-
-    if (loan.outstanding_cents === 0) {
-      loan.status = 'repaid';
-    } else if (loan.dueDate && new Date() > loan.dueDate) {
-      loan.status = 'defaulted';
-    }
-
-    await loan.save({ session });
-
-    await session.commitTransaction();
-    res.status(201).json({ message: 'Repayment recorded', repayment, loan });
-  } catch (err) {
-    await session.abortTransaction();
-    throw err;
-  } finally {
-    session.endSession();
-  }
+  res.sendStatus(200);
 });
 
-// @desc    Get repayment history for a loan
-// @route   GET /api/repayments/loan/:loanId
-// @access  Private
-const getRepaymentHistory = asyncHandler(async (req, res) => {
-  const repayments = await RepaymentModel.find({ loanId: req.params.loanId })
-    .sort({ createdAt: -1 })
-    .populate('paidBy', 'username role');
+/**
+ * ============================
+ * GET REPAYMENT HISTORY
+ * ============================
+ * Used by frontend dashboards
+ */
+export const getRepaymentHistory = asyncHandler(async (req, res) => {
+  const { loanId } = req.params;
 
-  res.json(repayments);
+  const loan = await Loan.findById(loanId);
+  if (!loan) {
+    res.status(404);
+    throw new Error('Loan not found');
+  }
+
+  const repayments = await Transaction.find({
+    loanId,
+    type: 'mpesa_c2b',
+    status: 'success',
+  }).sort({ createdAt: -1 });
+
+  res.json({
+    loanId,
+    total_paid_cents: loan.total_paid_cents,
+    outstanding_cents: loan.outstanding_cents,
+    repayments,
+  });
 });
-
-export { recordRepayment, getRepaymentHistory };

@@ -1,24 +1,23 @@
-// routes/repaymentRoutes.js
 import express from 'express';
-import {
-  recordRepayment,
-  getRepaymentHistory,
-} from '../controllers/repaymentController.js';
+import { getRepaymentHistory } from '../controllers/repaymentController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-router.post(
-  '/',
-  protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
-  recordRepayment
-);
-
+/**
+ * ============================
+ * VIEW REPAYMENT HISTORY
+ * ============================
+ */
 router.get(
-  '/loan/:loanId',
+  '/:loanId',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo(
+    'super_admin',
+    'initiator_admin',
+    'approver_admin',
+    'loan_officer'
+  ),
   getRepaymentHistory
 );
 

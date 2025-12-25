@@ -6,7 +6,9 @@ import { fileURLToPath } from 'url';
 
 import connectDB from './config/db.js';
 
-// Routes
+// -------------------------
+// Route Imports
+// -------------------------
 import authRoutes from './routes/authRoutes.js';
 import groupRoutes from './routes/groupRoutes.js';
 import clientRoutes from './routes/clientRoutes.js';
@@ -15,6 +17,9 @@ import repaymentRoutes from './routes/repaymentRoutes.js';
 import guarantorRoutes from './routes/guarantorRoutes.js';
 import creditAssessmentRoutes from './routes/creditAssessmentRoutes.js';
 import analysisRoutes from './routes/analysisRoutes.js';
+
+// 🔥 M-PESA ROUTES (CRITICAL)
+import mpesaRoutes from './routes/mpesaRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -33,7 +38,7 @@ app.use(express.urlencoded({ extended: true }));
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Serve uploaded photos
+// Serve uploaded files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // -------------------------
@@ -45,15 +50,17 @@ app.use('/api/clients', clientRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/repayments', repaymentRoutes);
 
-// 🔥 NEW ROUTES (YOU WERE MISSING THESE)
 app.use('/api/guarantors', guarantorRoutes);
 app.use('/api/credit-assessments', creditAssessmentRoutes);
+
+// 🔥 SAFARICOM CALLBACKS (NO AUTH)
+app.use('/api/mpesa', mpesaRoutes);
 
 // Optional / analytics
 app.use('/api/analysis', analysisRoutes);
 
 // -------------------------
-// Health Check (optional but useful)
+// Health Check
 // -------------------------
 app.get('/api/health', (req, res) => {
   res.json({
@@ -67,9 +74,8 @@ app.get('/api/health', (req, res) => {
 // Global Error Handler
 // -------------------------
 app.use((err, req, res, next) => {
-  const statusCode = res.statusCode && res.statusCode !== 200
-    ? res.statusCode
-    : 500;
+  const statusCode =
+    res.statusCode && res.statusCode !== 200 ? res.statusCode : 500;
 
   res.status(statusCode).json({
     message: err.message,

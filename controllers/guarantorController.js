@@ -1,42 +1,73 @@
-import GuarantorModel from '../models/GuarantorModel.js';
-import LoanModel from '../models/LoanModel.js';
 import asyncHandler from 'express-async-handler';
 
-// @desc    Add guarantor to a loan
-// @route   POST /api/guarantors
-// @access  Private (loan_officer)
-const addGuarantor = asyncHandler(async (req, res) => {
-  const { loanId, clientId, relationship, idCopyUrl, photoUrl } = req.body;
+import Guarantor from '../models/GuarantorModel.js';
+import Loan from '../models/LoanModel.js';
+import Client from '../models/ClientModel.js';
 
-  if (!loanId || !clientId || !relationship || !idCopyUrl || !photoUrl) {
+import LoanModel from '../models/LoanModel.js'; // same as Loan, kept explicit to avoid confusion
+
+async function hasRepaidFafa(clientId) {
+  return LoanModel.exists({ clientId, product: 'fafa', status: 'repaid' });
+}
+
+// POST /api/guarantors
+// loan_officer or initiator_admin (per your flow)
+const addGuarantor = asyncHandler(async (req, res) => {
+  const { loanId, guarantorClientNationalId, relationship, idCopyUrl, photoUrl } = req.body;
+
+  if (!loanId || !guarantorClientNationalId || !relationship || !idCopyUrl || !photoUrl) {
     res.status(400);
-    throw new Error('All guarantor fields are required');
+    throw new Error('loanId, guarantorClientNationalId, relationship, idCopyUrl, photoUrl are required');
   }
 
-  const loan = await LoanModel.findById(loanId);
-  if (!loan || loan.status !== 'initiated') {
+  const loan = await Loan.findById(loanId);
+  if (!loan) {
+    res.status(404);
+    throw new Error('Loan not found');
+  }
+  if (loan.status !== 'initiated') {
     res.status(400);
     throw new Error('Guarantors can only be added to initiated loans');
   }
 
-  const guarantor = await GuarantorModel.create({
+  const guarantorClient = await Client.findOne({ nationalId: String(guarantorClientNationalId).trim() });
+  if (!guarantorClient) {
+    res.status(404);
+    throw new Error('Guarantor client not found in system');
+  }
+
+  // Prevent applicant guaranteeing own loan
+  if (String(guarantorClient._id) === String(loan.clientId)) {
+    res.status(400);
+    throw new Error('Applicant cannot be guarantor for own loan');
+  }
+
+  // Eligibility snapshot
+  const repaidFafa = await hasRepaidFafa(guarantorClient._id);
+
+  const guarantor = await Guarantor.create({
     loanId,
-    clientId,
-    relationship,
+    clientId: guarantorClient._id,
+    relationship: String(relationship).trim(),
     external: true,
-    idCopyUrl,
-    photoUrl,
+    idCopyUrl: String(idCopyUrl).trim(),
+    photoUrl: String(photoUrl).trim(),
+    eligibility: {
+      hasRepaidFafaBefore: Boolean(repaidFafa),
+      checkedAt: new Date(),
+      notes: repaidFafa ? 'Eligible: repaid FAFA previously' : 'Ineligible: no repaid FAFA history',
+    },
     accepted: false,
   });
 
   res.status(201).json({ message: 'Guarantor added', guarantor });
 });
 
-// @desc    Accept guarantor responsibility
-// @route   PUT /api/guarantors/:id/accept
-// @access  Private (loan_officer or admin)
+// PUT /api/guarantors/:id/accept
+// loan_officer OR approver_admin OR super_admin (depending on your UX)
+// Acceptance means guarantor has agreed (in reality you’d do OTP/USSD; MVP = internal)
 const acceptGuarantor = asyncHandler(async (req, res) => {
-  const guarantor = await GuarantorModel.findById(req.params.id);
+  const guarantor = await Guarantor.findById(req.params.id);
   if (!guarantor) {
     res.status(404);
     throw new Error('Guarantor not found');
@@ -49,6 +80,8 @@ const acceptGuarantor = asyncHandler(async (req, res) => {
 
   guarantor.accepted = true;
   guarantor.acceptedAt = new Date();
+  guarantor.acceptedBy = req.user._id;
+
   await guarantor.save();
 
   res.json({ message: 'Guarantor accepted', guarantor });

@@ -1,22 +1,19 @@
-// controllers/clientController.js
 import ClientModel from '../models/ClientModel.js';
 import GroupModel from '../models/GroupModel.js';
 import asyncHandler from 'express-async-handler';
 
-// @desc    Onboard a new client
-// @route   POST /api/clients/onboard
-// @access  Private (admins or loan officers)
-const onboardClient = asyncHandler(async (req, res) => {
+/**
+ * ONBOARD CLIENT (Loan Officer)
+ * status = pending
+ */
+export const onboardClient = asyncHandler(async (req, res) => {
   const {
     name,
     nationalId,
     phone,
-    residence,
     businessType,
     businessLocation,
-    nextOfKinName,
-    nextOfKinPhone,
-    nextOfKinRelationship,
+    nextOfKin,
     groupId,
   } = req.body;
 
@@ -24,91 +21,92 @@ const onboardClient = asyncHandler(async (req, res) => {
     !name ||
     !nationalId ||
     !phone ||
-    !residence ||
     !businessType ||
     !businessLocation ||
-    !nextOfKinName ||
-    !nextOfKinPhone ||
-    !nextOfKinRelationship ||
-    !groupId ||
-    !req.file
+    !groupId
   ) {
     res.status(400);
-    throw new Error('All fields are required, including client photo');
+    throw new Error('Missing required fields');
   }
 
-  // Normalize identifiers
-  const nationalIdClean = nationalId.trim();
-  const phoneClean = phone.trim();
-  const kinPhoneClean = nextOfKinPhone.trim();
-
-  // Ensure client does not already exist
-  const clientExists = await ClientModel.findOne({ nationalId: nationalIdClean });
-  if (clientExists) {
-    res.status(409);
-    throw new Error('Client with this National ID already exists');
+  if (req.user.role !== 'loan_officer') {
+    res.status(403);
+    throw new Error('Only loan officers can onboard clients');
   }
 
-  // Verify group exists
   const group = await GroupModel.findById(groupId);
   if (!group) {
-    res.status(400);
+    res.status(404);
     throw new Error('Group not found');
   }
 
-  // Prevent duplicate membership (defensive)
-  if (group.members && group.members.length > 0) {
-    const alreadyMember = await ClientModel.exists({
-      _id: { $in: group.members },
-      nationalId: nationalIdClean,
-    });
-    if (alreadyMember) {
-      res.status(409);
-      throw new Error('Client already exists in this group');
-    }
+  if (String(group.loanOfficer) !== String(req.user._id)) {
+    res.status(403);
+    throw new Error('Not your group');
   }
 
-  // Store relative photo path (served statically)
-  const photoUrl = `/uploads/${req.file.filename}`;
+  const exists = await ClientModel.findOne({ nationalId: nationalId.trim() });
+  if (exists) {
+    res.status(409);
+    throw new Error('Client already exists');
+  }
 
   const client = await ClientModel.create({
     name: name.trim(),
-    nationalId: nationalIdClean,
-    phone: phoneClean,
-    photoUrl,
-    residence,
+    nationalId: nationalId.trim(),
+    phone: phone.trim(),
+    groupId,
+    branchId: group.branchId,
+    loanOfficer: req.user._id,
+    createdBy: req.user._id,
     businessType: businessType.trim(),
     businessLocation: businessLocation.trim(),
-    nextOfKin: {
-      name: nextOfKinName.trim(),
-      phone: kinPhoneClean,
-      relationship: nextOfKinRelationship.trim(),
-    },
-    groupId,
-    savings_balance_cents: 0, // funded later via M-Pesa / cash
-    registrationFeePaid: false,
-    initialSavingsPaid: false,
-    createdBy: req.user._id,
+    nextOfKin,
+    status: 'pending',
+    source: 'system',
   });
 
-  // Attach client to group
-  group.members.push(client._id);
-  await group.save();
-
   res.status(201).json({
-    message: 'Client onboarded successfully',
+    message: 'Client onboarded and pending approval',
     client,
   });
 });
 
-// @desc    Get all clients
-// @route   GET /api/clients
-// @access  Private
-const getClients = asyncHandler(async (req, res) => {
-  const clients = await ClientModel.find({})
-    .populate('groupId', 'name meetingDay meetingTime');
+/**
+ * APPROVE CLIENT (Admins)
+ */
+export const approveClient = asyncHandler(async (req, res) => {
+  const client = await ClientModel.findById(req.params.id);
+  if (!client) {
+    res.status(404);
+    throw new Error('Client not found');
+  }
+
+  if (!['initiator_admin', 'approver_admin', 'super_admin'].includes(req.user.role)) {
+    res.status(403);
+    throw new Error('Not allowed to approve clients');
+  }
+
+  client.status = 'active';
+  client.approvedBy = req.user._id;
+  await client.save();
+
+  res.json({ message: 'Client approved', client });
+});
+
+/**
+ * GET CLIENTS (Scoped)
+ */
+export const getClients = asyncHandler(async (req, res) => {
+  let filter = {};
+
+  if (req.user.role === 'loan_officer') {
+    filter.loanOfficer = req.user._id;
+  }
+
+  const clients = await ClientModel.find(filter)
+    .populate('groupId', 'name')
+    .select('-__v');
 
   res.json(clients);
 });
-
-export { onboardClient, getClients };

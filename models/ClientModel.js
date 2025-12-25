@@ -2,25 +2,16 @@ import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
 
-/**
- * Normalizers for messy Excel input
- */
-function normalizeNationalId(v) {
+function normalize(v) {
   return typeof v === 'string' ? v.trim() : v;
-}
-
-function normalizePhone(v) {
-  if (typeof v !== 'string') return v;
-  return v.trim();
 }
 
 const clientSchema = new Schema(
   {
-    /**
-     * ============================
-     * CORE IDENTITY (EXCEL SOURCE)
-     * ============================
-     */
+    /* =========================
+       IDENTITY
+    ========================= */
+
     name: {
       type: String,
       required: true,
@@ -30,24 +21,21 @@ const clientSchema = new Schema(
     nationalId: {
       type: String,
       required: true,
-      unique: true, // HARD RULE — never violated
-      trim: true,
-      set: normalizeNationalId,
+      unique: true,
+      set: normalize,
       index: true,
     },
 
     phone: {
       type: String,
       required: true,
-      trim: true,
-      set: normalizePhone,
+      set: normalize,
     },
 
-    /**
-     * ============================
-     * STRUCTURE
-     * ============================
-     */
+    /* =========================
+       OWNERSHIP & STRUCTURE
+    ========================= */
+
     groupId: {
       type: Schema.Types.ObjectId,
       ref: 'Group',
@@ -55,64 +43,73 @@ const clientSchema = new Schema(
       index: true,
     },
 
-    /**
-     * ============================
-     * BUSINESS CONTEXT (EXCEL)
-     * ============================
-     */
+    branchId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Branch',
+      required: true,
+      index: true,
+    },
+
+    loanOfficer: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
+    },
+
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+
+    approvedBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+
+    /* =========================
+       BUSINESS CONTEXT
+    ========================= */
+
     businessType: {
       type: String,
       required: true,
       trim: true,
     },
 
-    /**
-     * Excel "RESIDENCE" = business location, NOT housing
-     */
     businessLocation: {
       type: String,
       required: true,
       trim: true,
     },
 
-    /**
-     * ============================
-     * POST-MIGRATION FIELDS
-     * (NULL FOR LEGACY)
-     * ============================
-     */
+    /* =========================
+       KYC (POST-LEGACY)
+    ========================= */
 
-    /**
-     * Housing status (collected later)
-     */
     residenceType: {
       type: String,
       enum: ['owned', 'rented'],
       default: null,
     },
 
-    /**
-     * KYC media (placeholder allowed)
-     */
     photoUrl: {
       type: String,
       default: '/uploads/placeholder-client.jpg',
     },
 
-    /**
-     * Next of kin (legacy does NOT have this)
-     */
     nextOfKin: {
-      name: { type: String, trim: true },
-      phone: { type: String, trim: true, set: normalizePhone },
-      relationship: { type: String, trim: true },
+      name: String,
+      phone: String,
+      relationship: String,
     },
 
-    /**
-     * ============================
-     * FINANCIAL STATE (FUTURE)
-     * ============================
-     */
+    /* =========================
+       FINANCIAL STATE
+    ========================= */
+
     savings_balance_cents: {
       type: Number,
       default: 0,
@@ -129,22 +126,21 @@ const clientSchema = new Schema(
       default: false,
     },
 
-    /**
-     * ============================
-     * LEGACY METADATA (CRITICAL)
-     * ============================
-     */
-    source: {
-      type: String,
-      enum: ['legacy_excel', 'system'],
-      default: 'legacy_excel',
-      index: true,
-    },
+    /* =========================
+       STATE
+    ========================= */
 
     status: {
       type: String,
-      enum: ['legacy', 'active'],
-      default: 'legacy',
+      enum: ['legacy', 'pending', 'active', 'inactive'],
+      default: 'pending',
+      index: true,
+    },
+
+    source: {
+      type: String,
+      enum: ['legacy_excel', 'system'],
+      default: 'system',
       index: true,
     },
 
@@ -153,20 +149,6 @@ const clientSchema = new Schema(
       default: null,
     },
 
-    /**
-     * ============================
-     * AUDIT
-     * ============================
-     */
-    createdBy: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-
-    /**
-     * Excel registration date (historical)
-     */
     registrationDate: {
       type: Date,
     },
@@ -174,10 +156,11 @@ const clientSchema = new Schema(
   { timestamps: true }
 );
 
-/**
- * Common legacy access patterns
- */
-clientSchema.index({ groupId: 1, createdAt: -1 });
-clientSchema.index({ status: 1, source: 1 });
+/* =========================
+   INDEXES
+========================= */
+clientSchema.index({ groupId: 1, status: 1 });
+clientSchema.index({ loanOfficer: 1, status: 1 });
+clientSchema.index({ branchId: 1, status: 1 });
 
 export default mongoose.model('Client', clientSchema);
