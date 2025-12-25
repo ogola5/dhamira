@@ -5,6 +5,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import connectDB from './config/db.js';
+import { startCrons } from './cron.js';
+
+startCrons();
+
 
 // -------------------------
 // Route Imports

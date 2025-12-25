@@ -4,36 +4,33 @@ import mongoose from 'mongoose';
 import Loan from '../models/LoanModel.js';
 import Transaction from '../models/TransactionModel.js';
 import LedgerEntry from '../models/LedgerEntryModel.js';
+
 import { applyLoanLedger } from '../utils/applyLoanLedger.js';
 import { allocateRepaymentCents } from '../utils/repaymentAllocator.js';
+import { applyRepaymentToSchedule } from '../utils/applyRepaymentToSchedule.js';
 
 /**
  * ============================
  * M-PESA C2B CALLBACK
  * ============================
- * Called by Safaricom after Paybill payment
+ * Paybill confirmation endpoint
  * DO NOT protect with auth middleware
- *
- * Assumptions (MVP):
- * - BillRefNumber = loanId (ObjectId string)
- * - Ledger accounts include:
- *   cash_mpesa, loans_receivable, interest_income, suspense_overpay
  */
 export const mpesaC2BCallback = asyncHandler(async (req, res) => {
   const { TransID, MSISDN, TransAmount, BillRefNumber } = req.body;
 
-  // Basic payload sanity
+  // Minimal payload sanity
   if (!TransID || !TransAmount || !BillRefNumber) return res.sendStatus(200);
 
-  // 0) Fast idempotency check to avoid DB session overhead
-  const already = await Transaction.findOne({
+  // Fast idempotency
+  const exists = await Transaction.findOne({
     type: 'mpesa_c2b',
     mpesaReceipt: TransID,
   }).select('_id');
 
-  if (already) return res.sendStatus(200);
+  if (exists) return res.sendStatus(200);
 
-  // 1) BillRefNumber must be a loanId
+  // BillRefNumber must be loanId
   if (!mongoose.Types.ObjectId.isValid(BillRefNumber)) return res.sendStatus(200);
 
   const loan = await Loan.findById(BillRefNumber);
@@ -46,8 +43,8 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
   session.startTransaction();
 
   try {
-    // 2) Record transaction (unique index also protects idempotency)
-    const txArr = await Transaction.create(
+    // 1. Record transaction
+    const [tx] = await Transaction.create(
       [
         {
           type: 'mpesa_c2b',
@@ -63,16 +60,10 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
       { session }
     );
 
-    const tx = txArr[0];
-
-    // 3) Allocate repayment: interest first, principal next, overpay to suspense
+    // 2. Allocate repayment
     const alloc = await allocateRepaymentCents({ loan, amount_cents, session });
 
-    // 4) Double-entry ledger:
-    // DR cash_mpesa full amount
-    // CR interest_income (portion)
-    // CR loans_receivable (portion)
-    // CR suspense_overpay (if any)
+    // 3. Ledger entries
     const entries = [
       {
         account: 'cash_mpesa',
@@ -123,14 +114,21 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
 
     await LedgerEntry.create(entries, { session });
 
+    // 🔥 APPLY TO REPAYMENT SCHEDULE (PRINCIPAL + INTEREST)
+    await applyRepaymentToSchedule({
+      loanId: loan._id,
+      amount_cents: alloc.principal_cents + alloc.interest_cents,
+      session,
+    });
+
     await session.commitTransaction();
 
-    // 5) Recompute cached totals & status
+    // Update cached totals & loan status
     await applyLoanLedger(loan._id);
+
   } catch (err) {
     await session.abortTransaction();
-    // If duplicate TransID raced, unique index may throw.
-    // Safe to ignore and return 200 to stop Safaricom retries.
+    // Duplicate TransID or race → safe to ignore
   } finally {
     session.endSession();
   }

@@ -4,15 +4,9 @@ const { Schema } = mongoose;
 
 /**
  * LedgerEntry
- * ------------
- * Append-only accounting records.
- * Double-entry enforced at application level.
- *
- * Accounts:
- * - cash_mpesa        : M-Pesa wallet / cash control
- * - loans_receivable  : Principal outstanding
- * - interest_income   : Interest earned on repayments
- * - suspense_overpay  : Excess payments awaiting allocation/refund
+ * -----------
+ * Append-only, immutable accounting records.
+ * Corrections MUST be done via reversal entries.
  */
 const ledgerEntrySchema = new Schema(
   {
@@ -44,43 +38,53 @@ const ledgerEntrySchema = new Schema(
     loanId: {
       type: Schema.Types.ObjectId,
       ref: 'Loan',
-      index: true,
       required: true,
+      index: true,
     },
 
     transactionId: {
       type: Schema.Types.ObjectId,
       ref: 'Transaction',
-      index: true,
       required: true,
+      index: true,
     },
 
     entryType: {
       type: String,
-      enum: ['disbursement', 'repayment'],
+      enum: ['disbursement', 'repayment', 'reversal'],
       required: true,
       index: true,
     },
 
-    /**
-     * Ledger entries are immutable once completed.
-     * Failures should be handled by reversal entries,
-     * not by mutating existing rows.
-     */
     status: {
       type: String,
-      enum: ['pending', 'completed', 'failed'],
+      enum: ['completed', 'failed'],
       default: 'completed',
       index: true,
+      immutable: true,
     },
   },
   { timestamps: true }
 );
 
 /**
- * Helpful indexes for aggregation and reconciliation
+ * HARD RULE: ledger rows are immutable
  */
-ledgerEntrySchema.index({ loanId: 1, account: 1, direction: 1, status: 1 });
-ledgerEntrySchema.index({ transactionId: 1, entryType: 1 });
+ledgerEntrySchema.pre('updateOne', () => {
+  throw new Error('Ledger entries are immutable');
+});
+ledgerEntrySchema.pre('findOneAndUpdate', () => {
+  throw new Error('Ledger entries are immutable');
+});
+
+/**
+ * Indexes for reconciliation & reporting
+ */
+ledgerEntrySchema.index(
+  { transactionId: 1, account: 1, direction: 1 },
+  { unique: true }
+);
+
+ledgerEntrySchema.index({ loanId: 1, account: 1, direction: 1 });
 
 export default mongoose.model('LedgerEntry', ledgerEntrySchema);

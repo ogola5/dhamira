@@ -1,36 +1,30 @@
-// routes/groupRoutes.js
 import express from 'express';
 import {
   createGroup,
   approveGroup,
   assignSignatories,
+  updateGroup,
+  deactivateGroup,
   getGroups,
+  getGroupById,
 } from '../controllers/groupController.js';
+
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 /**
- * GROUP LISTING
- * - loan_officer: only their groups (controller scopes)
- * - admins: all groups
+ * LIST GROUPS
  */
 router.get(
   '/',
   protect,
-  restrictTo(
-    'super_admin',
-    'initiator_admin',
-    'approver_admin',
-    'loan_officer'
-  ),
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
   getGroups
 );
 
 /**
  * CREATE GROUP
- * - ONLY loan officers
- * - status = pending
  */
 router.post(
   '/',
@@ -40,8 +34,27 @@ router.post(
 );
 
 /**
+ * GET SINGLE GROUP
+ */
+router.get(
+  '/:id',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  getGroupById
+);
+
+/**
+ * UPDATE GROUP (LIMITED)
+ */
+router.put(
+  '/:id',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  updateGroup
+);
+
+/**
  * APPROVE GROUP
- * - admins + super admin
  */
 router.put(
   '/:id/approve',
@@ -51,15 +64,23 @@ router.put(
 );
 
 /**
- * ASSIGN SIGNATORIES
- * - loan officer (own group)
- * - super admin (override)
+ * ASSIGN SIGNATORIES (ONCE)
  */
 router.put(
   '/:id/signatories',
   protect,
   restrictTo('loan_officer', 'super_admin'),
   assignSignatories
+);
+
+/**
+ * DEACTIVATE GROUP
+ */
+router.put(
+  '/:id/deactivate',
+  protect,
+  restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
+  deactivateGroup
 );
 
 export default router;

@@ -1,44 +1,40 @@
 import RepaymentSchedule from '../models/RepaymentScheduleModel.js';
 
-function addDays(d, n) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-
-function addMonths(d, n) {
-  const x = new Date(d);
-  x.setMonth(x.getMonth() + n);
-  return x;
-}
-
 /**
- * Generates schedule rows for a loan.
- * Complexity: O(term)
+ * Generate repayment schedule AFTER disbursement
+ * Idempotent: safe to call multiple times
  */
-export async function generateRepaymentScheduleForLoan(loan, { session } = {}) {
-  if (!loan.disbursedAt) throw new Error('Loan must be disbursed to generate schedule');
+export async function generateRepaymentSchedule({ loan, session }) {
+  // Prevent duplicate schedules
+  const existing = await RepaymentSchedule.countDocuments(
+    { loanId: loan._id },
+    { session }
+  );
 
-  const isWeekly = loan.product === 'fafa';     // policy: FAFA weekly
-  const periods = loan.term;
+  if (existing > 0) return;
 
-  const per = loan.expected_installment_cents || Math.floor(loan.total_due_cents / periods);
+  const schedules = [];
+  const startDate = loan.disbursedAt;
+  const term = loan.term;
+  const installment = loan.expected_installment_cents;
 
-  const rows = [];
-  for (let i = 1; i <= periods; i++) {
-    const dueDate = isWeekly ? addDays(loan.disbursedAt, 7 * i) : addMonths(loan.disbursedAt, i);
+  for (let i = 1; i <= term; i++) {
+    const dueDate =
+      loan.product === 'fafa'
+        ? new Date(startDate.getTime() + i * 7 * 24 * 60 * 60 * 1000)
+        : new Date(
+            startDate.getFullYear(),
+            startDate.getMonth() + i,
+            startDate.getDate()
+          );
 
-    rows.push({
+    schedules.push({
       loanId: loan._id,
       installmentNo: i,
       dueDate,
-      amount_due_cents: per,
+      amount_due_cents: installment,
     });
   }
 
-  // Upsert-safe approach: delete then insert (simple MVP), or bulkWrite upserts
-  await RepaymentSchedule.deleteMany({ loanId: loan._id }).session(session || null);
-  await RepaymentSchedule.insertMany(rows, { session });
-
-  return rows;
+  await RepaymentSchedule.insertMany(schedules, { session });
 }

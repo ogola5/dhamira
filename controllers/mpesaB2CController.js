@@ -4,34 +4,25 @@ import mongoose from 'mongoose';
 import Loan from '../models/LoanModel.js';
 import Transaction from '../models/TransactionModel.js';
 import LedgerEntry from '../models/LedgerEntryModel.js';
+
 import { applyLoanLedger } from '../utils/applyLoanLedger.js';
+import { generateRepaymentSchedule } from '../utils/generateRepaymentSchedule.js';
 
 /**
  * ============================
  * M-PESA B2C RESULT CALLBACK
  * ============================
- * Called by Safaricom after disbursement attempt
+ * Called asynchronously by Safaricom
  * DO NOT protect with auth middleware
- *
- * Expects payload:
- * {
- *   Result: {
- *     ResultCode: 0|...,
- *     OriginatorConversationID: "...",
- *     TransactionID: "..." // present on success
- *     ...
- *   }
- * }
  */
 export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
   const result = req.body?.Result;
   if (!result) return res.sendStatus(200);
 
   const { ResultCode, OriginatorConversationID, TransactionID } = result;
-
   if (!OriginatorConversationID) return res.sendStatus(200);
 
-  // 1) Find transaction created during initiation
+  // 1. Find pending B2C transaction
   const tx = await Transaction.findOne({
     type: 'mpesa_b2c',
     checkoutRequestId: OriginatorConversationID,
@@ -39,8 +30,8 @@ export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
 
   if (!tx) return res.sendStatus(200);
 
-  // 2) Idempotency: if already finalized, ignore
-  if (tx.status === 'success' || tx.status === 'failed') {
+  // 2. Idempotency: already finalized
+  if (['success', 'failed'].includes(tx.status)) {
     return res.sendStatus(200);
   }
 
@@ -48,11 +39,10 @@ export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
   session.startTransaction();
 
   try {
-    // Always store callback for audit
     tx.rawCallback = req.body;
 
+    // ❌ FAILED DISBURSEMENT
     if (Number(ResultCode) !== 0) {
-      // ❌ Disbursement failed
       tx.status = 'failed';
       await tx.save({ session });
 
@@ -60,31 +50,25 @@ export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // ✅ Disbursement success
+    // ✅ SUCCESSFUL DISBURSEMENT
     tx.status = 'success';
-
-    // Store actual M-Pesa TransactionID for reconciliation (important)
-    if (TransactionID) {
-      tx.mpesaReceipt = TransactionID;
-    }
-
+    if (TransactionID) tx.mpesaReceipt = TransactionID;
     await tx.save({ session });
 
     const loan = await Loan.findById(tx.loanId).session(session);
     if (!loan) throw new Error('Loan not found');
 
-    // 3) Prevent duplicate disbursement ledger posting
-    const existingLedger = await LedgerEntry.findOne({
+    // Prevent duplicate ledger posting
+    const alreadyPosted = await LedgerEntry.findOne({
       transactionId: tx._id,
       entryType: 'disbursement',
       status: 'completed',
     }).session(session);
 
-    if (!existingLedger) {
+    if (!alreadyPosted) {
       const amount_cents = tx.amount_cents;
 
-      // 4) Double-entry ledger for disbursement:
-      // DR loans_receivable, CR cash_mpesa
+      // Double-entry ledger
       await LedgerEntry.create(
         [
           {
@@ -109,21 +93,23 @@ export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
         { session }
       );
 
-      // 5) Update loan lifecycle (cached fields)
-      if (!loan.disbursedAt) {
-        loan.disbursedAt = new Date();
-      }
-      loan.disbursementTransactionId = tx._id;
+      // Loan lifecycle update
       loan.status = 'disbursed';
+      loan.disbursedAt = loan.disbursedAt || new Date();
+      loan.disbursementTransactionId = tx._id;
       loan.disbursedBy = tx.initiatedBy;
 
       await loan.save({ session });
+
+      // 🔥 GENERATE REPAYMENT SCHEDULE (ONCE)
+      await generateRepaymentSchedule({ loan, session });
     }
 
     await session.commitTransaction();
 
-    // 6) Recompute cached totals from ledger
+    // Recompute cached totals
     await applyLoanLedger(tx.loanId);
+
   } catch (err) {
     await session.abortTransaction();
     throw err;

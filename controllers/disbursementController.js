@@ -1,8 +1,17 @@
 import asyncHandler from 'express-async-handler';
+import mongoose from 'mongoose';
+
 import Loan from '../models/LoanModel.js';
 import Transaction from '../models/TransactionModel.js';
-import LedgerEntry from '../models/LedgerEntryModel.js';
 
+/**
+ * ============================
+ * INITIATE M-PESA B2C DISBURSEMENT
+ * ============================
+ * - Idempotent
+ * - No ledger posting here
+ * - Actual ledger posted on B2C RESULT callback
+ */
 export const disburseLoan = asyncHandler(async (req, res) => {
   const loan = await Loan.findById(req.params.id);
   if (!loan) {
@@ -15,49 +24,50 @@ export const disburseLoan = asyncHandler(async (req, res) => {
     throw new Error('Loan must be approved before disbursement');
   }
 
-  // Create transaction (B2C OUT)
-  const tx = await Transaction.create({
-    type: 'mpesa_b2c',
-    direction: 'OUT',
-    amount_cents: loan.principal_cents,
-    status: 'pending',
-    loanId: loan._id,
-    initiatedBy: req.user._id,
-  });
+  if (loan.disbursementTransactionId) {
+    res.status(400);
+    throw new Error('Disbursement already initiated');
+  }
 
-  // Ledger entries (PENDING)
-  await LedgerEntry.create([
-    {
-      account: 'loans_receivable',
-      direction: 'DEBIT',
-      amount_cents: loan.principal_cents,
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const tx = await Transaction.create(
+      [
+        {
+          type: 'mpesa_b2c',
+          direction: 'OUT',
+          amount_cents: loan.principal_cents,
+          status: 'pending',
+          loanId: loan._id,
+          initiatedBy: req.user._id,
+        },
+      ],
+      { session }
+    );
+
+    loan.status = 'disbursement_pending';
+    loan.disbursementTransactionId = tx[0]._id;
+    await loan.save({ session });
+
+    await session.commitTransaction();
+
+    /**
+     * 🔥 IMPORTANT:
+     * Call B2CService.disburseLoan() HERE (async, non-blocking)
+     * Pass tx[0]._id as reference
+     */
+
+    res.json({
+      message: 'Disbursement initiated',
       loanId: loan._id,
-      transactionId: tx._id,
-      entryType: 'disbursement',
-    },
-    {
-      account: 'cash_mpesa',
-      direction: 'CREDIT',
-      amount_cents: loan.principal_cents,
-      loanId: loan._id,
-      transactionId: tx._id,
-      entryType: 'disbursement',
-    },
-  ]);
-
-  loan.status = 'disbursement_pending';
-  loan.disbursementTransactionId = tx._id;
-  await loan.save();
-
-  /**
-   * HERE:
-   * call Safaricom B2C API (async)
-   * pass tx._id as reference
-   */
-
-  res.json({
-    message: 'Disbursement initiated (B2C pending)',
-    loanId: loan._id,
-    transactionId: tx._id,
-  });
+      transactionId: tx[0]._id,
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    throw err;
+  } finally {
+    session.endSession();
+  }
 });

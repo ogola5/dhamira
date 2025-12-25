@@ -1,8 +1,18 @@
 import express from 'express';
-import { getRepaymentHistory } from '../controllers/repaymentController.js';
+import {
+  mpesaC2BCallback,
+  getRepaymentHistory,
+} from '../controllers/repaymentController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+/**
+ * ============================
+ * M-PESA C2B CALLBACK (PUBLIC)
+ * ============================
+ */
+router.post('/mpesa/c2b/callback', mpesaC2BCallback);
 
 /**
  * ============================

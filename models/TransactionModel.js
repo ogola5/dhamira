@@ -2,9 +2,14 @@ import mongoose from 'mongoose';
 
 const { Schema } = mongoose;
 
+/**
+ * Transaction
+ * -----------
+ * Represents provider interaction (M-Pesa)
+ * NOT accounting truth — ledger is.
+ */
 const transactionSchema = new Schema(
   {
-    // M-Pesa transaction type
     type: {
       type: String,
       enum: ['mpesa_b2c', 'mpesa_c2b'],
@@ -31,36 +36,37 @@ const transactionSchema = new Schema(
       index: true,
     },
 
-    // ==== IDEMPOTENCY & PROVIDER REFERENCES ====
+    // ===== PROVIDER REFERENCES =====
 
-    // C2B receipt number (TransID)
     mpesaReceipt: {
       type: String,
-      index: true,
       sparse: true,
+      index: true,
     },
 
-    // B2C OriginatorConversationID
     checkoutRequestId: {
       type: String,
-      index: true,
       sparse: true,
+      index: true,
     },
 
-    // Internal idempotency (B2C initiation)
+    providerConversationId: {
+      type: String,
+      sparse: true,
+      index: true,
+    },
+
     idempotencyKey: {
       type: String,
-      index: true,
       sparse: true,
+      index: true,
     },
 
-    // ==== METADATA ====
+    phone: String,
 
-    phone: { type: String },
-
-    rawCallback: { type: Object },
-
-    // ==== RELATIONS ====
+    rawCallback: {
+      type: Object,
+    },
 
     loanId: {
       type: Schema.Types.ObjectId,
@@ -76,16 +82,27 @@ const transactionSchema = new Schema(
   { timestamps: true }
 );
 
-// Prevent duplicate C2B callbacks
+/**
+ * Idempotency guarantees
+ */
 transactionSchema.index(
   { type: 1, mpesaReceipt: 1 },
   { unique: true, sparse: true }
 );
 
-// Prevent duplicate B2C initiation
 transactionSchema.index(
   { type: 1, idempotencyKey: 1 },
   { unique: true, sparse: true }
 );
+
+/**
+ * Prevent mutation after finalization
+ */
+transactionSchema.pre('findOneAndUpdate', function () {
+  const update = this.getUpdate();
+  if (update?.status && ['success', 'failed'].includes(update.status)) {
+    throw new Error('Finalized transactions are immutable');
+  }
+});
 
 export default mongoose.model('Transaction', transactionSchema);

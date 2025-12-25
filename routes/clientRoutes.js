@@ -1,44 +1,48 @@
-// routes/clientRoutes.js
 import express from 'express';
 import {
   onboardClient,
   approveClient,
   getClients,
+  getClientById,
+  updateClient,
+  deactivateClient,
+  searchClients,
 } from '../controllers/clientController.js';
+
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 import multer from 'multer';
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'uploads/'),
-  filename: (req, file, cb) =>
-    cb(null, `${Date.now()}-${file.originalname}`),
-});
-
-const upload = multer({ storage });
-
+const upload = multer({ dest: 'uploads/' });
 const router = express.Router();
 
 /**
+ * ============================
+ * SEARCH
+ * ============================
+ */
+router.get(
+  '/search',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  searchClients
+);
+
+/**
+ * ============================
  * LIST CLIENTS
- * - loan_officer: only their portfolio
- * - admins: all
+ * ============================
  */
 router.get(
   '/',
   protect,
-  restrictTo(
-    'super_admin',
-    'initiator_admin',
-    'approver_admin',
-    'loan_officer'
-  ),
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
   getClients
 );
 
 /**
- * ONBOARD CLIENT
- * - ONLY loan officer
- * - status = pending
+ * ============================
+ * CREATE CLIENT
+ * ============================
  */
 router.post(
   '/',
@@ -49,14 +53,51 @@ router.post(
 );
 
 /**
+ * ============================
+ * GET SINGLE CLIENT
+ * ============================
+ */
+router.get(
+  '/:id',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  getClientById
+);
+
+/**
+ * ============================
+ * UPDATE CLIENT
+ * ============================
+ */
+router.put(
+  '/:id',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  updateClient
+);
+
+/**
+ * ============================
  * APPROVE CLIENT
- * - admins + super admin
+ * ============================
  */
 router.put(
   '/:id/approve',
   protect,
   restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
   approveClient
+);
+
+/**
+ * ============================
+ * DEACTIVATE CLIENT
+ * ============================
+ */
+router.put(
+  '/:id/deactivate',
+  protect,
+  restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
+  deactivateClient
 );
 
 export default router;
