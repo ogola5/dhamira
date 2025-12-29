@@ -3,6 +3,9 @@ import mongoose from 'mongoose';
 
 import Loan from '../models/LoanModel.js';
 import Transaction from '../models/TransactionModel.js';
+import Client from '../models/ClientModel.js';
+import { DarajaClient } from '../mpesa/darajaClient.js';
+import { B2CService } from '../mpesa/b2cService.js';
 
 /**
  * ============================
@@ -52,6 +55,39 @@ export const disburseLoan = asyncHandler(async (req, res) => {
     await loan.save({ session });
 
     await session.commitTransaction();
+
+    // Trigger M-Pesa B2C (non-blocking). Create client and daraja instances from env.
+    (async () => {
+      try {
+        const client = await Client.findById(loan.clientId).select('phone');
+        const daraja = new DarajaClient({
+          consumerKey: process.env.MPESA_CONSUMER_KEY || '',
+          consumerSecret: process.env.MPESA_CONSUMER_SECRET || '',
+          baseUrl: process.env.MPESA_BASE_URL || 'https://api.safaricom.co.ke',
+        });
+
+        const b2c = new B2CService({
+          darajaClient: daraja,
+          config: {
+            initiatorName: process.env.MPESA_B2C_INITIATOR_NAME || '',
+            securityCredential: process.env.MPESA_B2C_SECURITY_CREDENTIAL || '',
+            shortcode: process.env.MPESA_B2C_SHORTCODE || '',
+            timeoutUrl: process.env.MPESA_B2C_TIMEOUT_URL || `${process.env.BASE_URL || ''}/api/mpesa/b2c/result`,
+            resultUrl: process.env.MPESA_B2C_RESULT_URL || `${process.env.BASE_URL || ''}/api/mpesa/b2c/result`,
+          },
+        });
+
+        await b2c.disburseLoan({
+          loanId: loan._id,
+          phone: client?.phone || req.body.phone || '',
+          amount_cents: loan.principal_cents,
+          initiatedBy: req.user._id,
+        });
+      } catch (e) {
+        // Log and continue - final state will be handled by callback
+        console.error('B2C disbursement failed to start:', e.message || e);
+      }
+    })();
 
     /**
      * 🔥 IMPORTANT:

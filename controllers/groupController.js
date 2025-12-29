@@ -20,9 +20,9 @@ export const createGroup = asyncHandler(async (req, res) => {
     throw new Error('Group name is required');
   }
 
-  if (req.user.role !== 'loan_officer') {
+  if (!['loan_officer', 'super_admin'].includes(req.user.role)) {
     res.status(403);
-    throw new Error('Only loan officers can create groups');
+    throw new Error('Only loan officers or super admin can create groups');
   }
 
   const exists = await Group.findOne({ name: name.trim() });

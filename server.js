@@ -26,6 +26,7 @@ import analyticsRoutes from './routes/analyticsRoutes.js';
 
 // 🔥 M-PESA ROUTES (CRITICAL)
 import mpesaRoutes from './routes/mpesaRoutes.js';
+import savingsRoutes from './routes/savingsRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -78,6 +79,7 @@ app.use('/api/credit-assessments', creditAssessmentRoutes);
 
 // 🔥 SAFARICOM CALLBACKS (NO AUTH)
 app.use('/api/mpesa', mpesaRoutes);
+app.use('/api/savings', savingsRoutes);
 
 // Optional / analytics
 app.use('/api/analysis', analysisRoutes);

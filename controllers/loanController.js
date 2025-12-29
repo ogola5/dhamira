@@ -42,7 +42,7 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     throw new Error('product, amount (amountCents or amountKES) and term are required');
   }
 
-  if (!mustBeOneOf(req.user.role, ['initiator_admin', 'loan_officer', 'super_admin'])) {
+  if (!mustBeOneOf(req.user.role, ['initiator_admin', 'super_admin'])) {
     res.status(403);
     throw new Error('Access denied');
   }

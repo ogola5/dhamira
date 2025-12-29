@@ -8,7 +8,7 @@ const router = express.Router();
 router.post(
   '/',
   protect,
-  restrictTo('loan_officer', 'initiator_admin'),
+  restrictTo('loan_officer', 'super_admin'),
   submitCreditAssessment
 );
 

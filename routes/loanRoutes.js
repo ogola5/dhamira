@@ -28,7 +28,7 @@ router.get(
 router.post(
   '/initiate',
   protect,
-  restrictTo('initiator_admin', 'loan_officer', 'super_admin'),
+  restrictTo('initiator_admin', 'super_admin'),
   initiateLoan
 );
 
@@ -38,7 +38,7 @@ router.post(
 router.get(
   '/group-preflight/:id',
   protect,
-  restrictTo('initiator_admin', 'loan_officer', 'super_admin'),
+  restrictTo('initiator_admin', 'super_admin'),
   groupPreflight
 );
 
@@ -68,7 +68,7 @@ router.put(
 router.post(
   '/:id/disburse',
   protect,
-  restrictTo('approver_admin', 'initiator_admin', 'super_admin'),
+  restrictTo('approver_admin', 'super_admin'),
   disburseLoan
 );
 

@@ -28,8 +28,8 @@ router.get(
  */
 router.post(
   '/',
-  protect,
-  restrictTo('loan_officer'),
+    protect,
+    restrictTo('loan_officer', 'super_admin'),
   createGroup
 );
 

@@ -7,6 +7,7 @@ import {
   updateClient,
   deactivateClient,
   searchClients,
+  addSavings,
 } from '../controllers/clientController.js';
 
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
@@ -47,9 +48,19 @@ router.get(
 router.post(
   '/',
   protect,
-  restrictTo('loan_officer'),
+  restrictTo('loan_officer', 'super_admin'),
   upload.single('photo'),
   onboardClient
+);
+
+/**
+ * ADD SAVINGS (admin action)
+ */
+router.post(
+  '/:id/savings',
+  protect,
+  restrictTo('initiator_admin', 'super_admin'),
+  addSavings
 );
 
 /**

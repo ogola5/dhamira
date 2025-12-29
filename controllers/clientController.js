@@ -34,10 +34,10 @@ export const onboardClient = asyncHandler(async (req, res) => {
   }
 
   const group = await Group.findById(groupId);
-  if (!group) {
-    res.status(404);
-    throw new Error('Group not found');
-  }
+      if (!['loan_officer', 'super_admin'].includes(req.user.role)) {
+        res.status(403);
+        throw new Error('Only loan officers or super admin can onboard clients');
+      }
 
   if (String(group.loanOfficer) !== String(req.user._id)) {
     res.status(403);
@@ -77,6 +77,49 @@ export const onboardClient = asyncHandler(async (req, res) => {
  * ============================
  * Role: admins
  */
+    /**
+     * ============================
+     * ADD SAVINGS (ADMIN ACTION)
+     * ============================
+     * Role: initiator_admin, super_admin
+     */
+    export const addSavings = asyncHandler(async (req, res) => {
+      const { amountKES, amountCents } = req.body;
+      const clientId = req.params.id;
+
+      if (!clientId) {
+        res.status(400);
+        throw new Error('Client id is required');
+      }
+
+      const client = await Client.findById(clientId);
+      if (!client) {
+        res.status(404);
+        throw new Error('Client not found');
+      }
+
+      if (!['initiator_admin', 'super_admin'].includes(req.user.role)) {
+        res.status(403);
+        throw new Error('Not allowed to add savings');
+      }
+
+      const cents = typeof amountCents !== 'undefined'
+        ? Math.round(Number(amountCents))
+        : (typeof amountKES !== 'undefined' ? Math.round(Number(amountKES) * 100) : undefined);
+
+      if (typeof cents === 'undefined' || !Number.isFinite(cents) || cents <= 0) {
+        res.status(400);
+        throw new Error('Invalid amount');
+      }
+
+      client.savings_balance_cents = (client.savings_balance_cents || 0) + cents;
+      // mark initial savings flag if not already
+      if (!client.initialSavingsPaid) client.initialSavingsPaid = true;
+
+      await client.save();
+
+      res.json({ message: 'Savings added', client });
+    });
 export const approveClient = asyncHandler(async (req, res) => {
   const client = await Client.findById(req.params.id);
   if (!client) {
