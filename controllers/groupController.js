@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 
 import Group from '../models/GroupModel.js';
 import Loan from '../models/LoanModel.js';
+import Client from '../models/ClientModel.js';
 
 /**
  * ============================
@@ -83,9 +84,30 @@ export const approveGroup = asyncHandler(async (req, res) => {
  * ============================
  */
 export const assignSignatories = asyncHandler(async (req, res) => {
-  const { signatories } = req.body;
+  const { signatories, signatoryAssignments } = req.body;
 
-  if (!Array.isArray(signatories) || signatories.length !== 3) {
+  let finalSignatories = null;
+
+  // Accept payload either as `signatories` (current shape) or
+  // `signatoryAssignments` = [{ role, memberNationalId }]
+  if (Array.isArray(signatoryAssignments) && signatoryAssignments.length === 3) {
+    // Resolve nationalIds to clientIds
+    finalSignatories = [];
+    for (const a of signatoryAssignments) {
+      if (!a.role || !a.memberNationalId) {
+        res.status(400);
+        throw new Error('Each signatory assignment requires role and memberNationalId');
+      }
+      const client = await Client.findOne({ nationalId: String(a.memberNationalId).trim() });
+      if (!client) {
+        res.status(404);
+        throw new Error(`Guarantor client not found: ${a.memberNationalId}`);
+      }
+      finalSignatories.push({ role: a.role, clientId: client._id });
+    }
+  } else if (Array.isArray(signatories) && signatories.length === 3) {
+    finalSignatories = signatories;
+  } else {
     res.status(400);
     throw new Error('Exactly 3 signatories required');
   }
@@ -121,7 +143,7 @@ export const assignSignatories = asyncHandler(async (req, res) => {
     throw new Error('Signatories already assigned');
   }
 
-  group.signatories = signatories;
+  group.signatories = finalSignatories;
   await group.save();
 
   res.json({ message: 'Signatories assigned', group });
@@ -206,17 +228,23 @@ export const deactivateGroup = asyncHandler(async (req, res) => {
  */
 export const getGroups = asyncHandler(async (req, res) => {
   const filter = {};
+  if (req.user.role === 'loan_officer') filter.loanOfficer = req.user._id;
 
-  if (req.user.role === 'loan_officer') {
-    filter.loanOfficer = req.user._id;
-  }
+  const page = Number(req.query.page) || 1;
+  const limit = Math.min(Number(req.query.limit) || 20, 1000);
+  const skip = (page - 1) * limit;
 
-  const groups = await Group.find(filter)
-    .populate('loanOfficer', 'username')
-    .populate('members', 'name nationalId')
-    .sort({ createdAt: -1 });
+  const [total, groups] = await Promise.all([
+    Group.countDocuments(filter),
+    Group.find(filter)
+      .populate('loanOfficer', 'username')
+      .populate('members', 'name nationalId')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+  ]);
 
-  res.json(groups);
+  res.json({ page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), data: groups });
 });
 
 /**

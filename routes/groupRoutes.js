@@ -73,6 +73,14 @@ router.put(
   assignSignatories
 );
 
+// Alias path expected by some frontends
+router.put(
+  '/:id/assign-signatories',
+  protect,
+  restrictTo('loan_officer', 'super_admin'),
+  assignSignatories
+);
+
 /**
  * DEACTIVATE GROUP
  */

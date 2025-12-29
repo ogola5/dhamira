@@ -31,11 +31,15 @@ async function computeCycleForClient(clientId, product) {
    INITIATE LOAN
 ============================= */
 export const initiateLoan = asyncHandler(async (req, res) => {
-  const { clientNationalId, groupId, product, amountKES, term, cycle } = req.body;
+  const { clientNationalId, groupId, product, productId, amountKES, amountCents, term, termMonths, cycle } = req.body;
 
-  if (!product || !amountKES || !term) {
+  const productVal = product || productId;
+  const termVal = term || termMonths;
+  const amountCentsVal = typeof amountCents !== 'undefined' ? Number(amountCents) : (typeof amountKES !== 'undefined' ? Math.round(Number(amountKES) * 100) : undefined);
+
+  if (!productVal || typeof amountCentsVal === 'undefined' || !termVal) {
     res.status(400);
-    throw new Error('product, amountKES, term are required');
+    throw new Error('product, amount (amountCents or amountKES) and term are required');
   }
 
   if (!mustBeOneOf(req.user.role, ['initiator_admin', 'loan_officer', 'super_admin'])) {
@@ -43,10 +47,10 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     throw new Error('Access denied');
   }
 
-  const principal_cents = Math.round(Number(amountKES) * 100);
+  const principal_cents = Math.round(Number(amountCentsVal));
   if (!Number.isFinite(principal_cents) || principal_cents <= 0) {
     res.status(400);
-    throw new Error('Invalid amountKES');
+    throw new Error('Invalid amount');
   }
 
   // GROUP-LEVEL initiation: create loans for all eligible members
@@ -65,11 +69,11 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     }
 
     const memberCount = Array.isArray(group.members) ? group.members.length : 0;
-    if (product === 'fafa' && memberCount < 5) {
+    if (productVal === 'fafa' && memberCount < 5) {
       res.status(400);
       throw new Error('FAFA requires group of 5+ members');
     }
-    if (product === 'business' && memberCount < 7) {
+    if (productVal === 'business' && memberCount < 7) {
       res.status(400);
       throw new Error('Business loan requires group of 7+ members');
     }
@@ -99,14 +103,14 @@ export const initiateLoan = asyncHandler(async (req, res) => {
           continue;
         }
 
-        const computedCycle = cycle ? Number(cycle) : await computeCycleForClient(client._id, product);
+        const computedCycle = cycle ? Number(cycle) : await computeCycleForClient(client._id, productVal);
 
         const loan = await Loan.create({
           clientId: client._id,
           groupId: group._id,
           branchId: group.branchId,
-          product,
-          term: Number(term),
+          product: productVal,
+          term: Number(termVal),
           cycle: Number(computedCycle),
           principal_cents,
           loanType: 'individual',
@@ -119,16 +123,18 @@ export const initiateLoan = asyncHandler(async (req, res) => {
         if (Array.isArray(req.body.guarantors) && req.body.guarantors.length > 0) {
           for (const g of req.body.guarantors) {
             try {
-              const guarantorClient = await Client.findOne({ nationalId: String(g.clientNationalId).trim() });
+              const nationalId = typeof g === 'string' ? g : g.clientNationalId;
+              if (!nationalId) continue;
+              const guarantorClient = await Client.findOne({ nationalId: String(nationalId).trim() });
               if (!guarantorClient) continue;
               await Guarantor.create({
                 loanId: loan._id,
                 clientId: guarantorClient._id,
-                relationship: g.relationship || 'unknown',
-                external: g.external !== undefined ? !!g.external : true,
-                idCopyUrl: g.idCopyUrl || '/uploads/placeholder-id.jpg',
-                photoUrl: g.photoUrl || '/uploads/placeholder-client.jpg',
-                eligibility: { hasRepaidFafaBefore: !!g.hasRepaidFafaBefore },
+                relationship: (typeof g === 'string' ? 'unknown' : g.relationship) || 'unknown',
+                external: (typeof g === 'string' ? true : (g.external !== undefined ? !!g.external : true)),
+                idCopyUrl: (typeof g === 'string' ? '/uploads/placeholder-id.jpg' : g.idCopyUrl) || '/uploads/placeholder-id.jpg',
+                photoUrl: (typeof g === 'string' ? '/uploads/placeholder-client.jpg' : g.photoUrl) || '/uploads/placeholder-client.jpg',
+                eligibility: { hasRepaidFafaBefore: !!(typeof g === 'string' ? false : g.hasRepaidFafaBefore) },
               });
             } catch (e) {
               // continue on guarantor creation errors
@@ -201,14 +207,14 @@ export const initiateLoan = asyncHandler(async (req, res) => {
 
   const computedCycle = cycle
     ? Number(cycle)
-    : await computeCycleForClient(client._id, product);
+    : await computeCycleForClient(client._id, productVal);
 
   const loan = await Loan.create({
     clientId: client._id,
     groupId: client.groupId,
     branchId: group.branchId,
-    product,
-    term: Number(term),
+    product: productVal,
+    term: Number(termVal),
     cycle: Number(computedCycle),
     principal_cents,
     loanType: 'individual',
@@ -347,14 +353,23 @@ export const getLoans = asyncHandler(async (req, res) => {
     match.groupId = { $in: groups.map(g => g._id) };
   }
 
-  const loans = await Loan.find(match)
-    .populate('clientId', 'name nationalId phone')
-    .populate('groupId', 'name')
-    .populate('initiatedBy', 'username role')
-    .populate('approvedBy', 'username role')
-    .sort({ createdAt: -1 });
+  const page = Number(req.query.page) || 1;
+  const limit = Math.min(Number(req.query.limit) || 20, 1000);
+  const skip = (page - 1) * limit;
 
-  res.json(loans);
+  const [total, loans] = await Promise.all([
+    Loan.countDocuments(match),
+    Loan.find(match)
+      .populate('clientId', 'name nationalId phone')
+      .populate('groupId', 'name')
+      .populate('initiatedBy', 'username role')
+      .populate('approvedBy', 'username role')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+  ]);
+
+  res.json({ page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), data: loans });
 });
 
 /**
