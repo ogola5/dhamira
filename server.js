@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 
 import connectDB from './config/db.js';
 import { startCrons } from './cron.js';
+import cors from 'cors';
 
 startCrons();
 
@@ -21,6 +22,7 @@ import repaymentRoutes from './routes/repaymentRoutes.js';
 import guarantorRoutes from './routes/guarantorRoutes.js';
 import creditAssessmentRoutes from './routes/creditAssessmentRoutes.js';
 import analysisRoutes from './routes/analysisRoutes.js';
+import analyticsRoutes from './routes/analyticsRoutes.js';
 
 // 🔥 M-PESA ROUTES (CRITICAL)
 import mpesaRoutes from './routes/mpesaRoutes.js';
@@ -35,6 +37,14 @@ const app = express();
 // -------------------------
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Enable CORS for frontend origin (adjust as needed)
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    credentials: true,
+  })
+);
 
 // -------------------------
 // Static files (uploads)
@@ -62,6 +72,7 @@ app.use('/api/mpesa', mpesaRoutes);
 
 // Optional / analytics
 app.use('/api/analysis', analysisRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // -------------------------
 // Health Check
@@ -78,6 +89,7 @@ app.get('/api/health', (req, res) => {
 // Global Error Handler
 // -------------------------
 app.use((err, req, res, next) => {
+  console.error(err);
   const statusCode =
     res.statusCode && res.statusCode !== 200 ? res.statusCode : 500;
 
@@ -90,7 +102,7 @@ app.use((err, req, res, next) => {
 // -------------------------
 // Server Start
 // -------------------------
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5011;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });

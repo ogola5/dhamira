@@ -115,17 +115,28 @@ export const getClients = asyncHandler(async (req, res) => {
   }
 
   const page = Number(req.query.page) || 1;
-  const limit = Math.min(Number(req.query.limit) || 20, 50);
+  const limit = Math.min(Number(req.query.limit) || 20, 200);
   const skip = (page - 1) * limit;
 
-  const clients = await Client.find(filter)
-    .populate('groupId', 'name')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .select('-__v');
+  const [total, clients] = await Promise.all([
+    Client.countDocuments(filter),
+    Client.find(filter)
+      .populate('groupId', 'name')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select('-__v'),
+  ]);
 
-  res.json(clients);
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  res.json({
+    page,
+    limit,
+    total,
+    totalPages,
+    data: clients,
+  });
 });
 
 /**

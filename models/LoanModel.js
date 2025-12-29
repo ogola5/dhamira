@@ -35,6 +35,13 @@ const loanSchema = new Schema(
     // FAFA: 5% per week, Business: 3% per month
     rate_per_period: { type: Number, required: true, min: 0 },
 
+    // Optional override for interest rate supplied at application time (percent)
+    interestRatePercent: { type: Number, default: null },
+
+    // Loan type and purpose
+    loanType: { type: String, enum: ['individual', 'group'], default: 'individual', index: true },
+    purpose: { type: String, trim: true, default: '' },
+
     // Application fee (LAF)
     application_fee_cents: { type: Number, required: true, min: 0 },
     applicationFeePaid: { type: Boolean, default: false, index: true },
@@ -95,8 +102,8 @@ loanSchema.pre('validate', function (next) {
 
     if (![4, 5, 6].includes(term)) return next(new Error('FAFA term must be 4–6 weeks'));
 
-    // Pricing: 5% per week simple
-    this.rate_per_period = 0.05;
+    // Pricing: default 5% per week simple, allow override via interestRatePercent
+    this.rate_per_period = this.interestRatePercent ? this.interestRatePercent / 100 : 0.05;
     const totalDue = Math.round(principal * (1 + this.rate_per_period * term));
     this.total_due_cents = totalDue;
     this.outstanding_cents = totalDue;
@@ -139,8 +146,8 @@ loanSchema.pre('validate', function (next) {
       if (term < 6 || term > 12) return next(new Error('Business cycle 4 term must be 6–12 months'));
     }
 
-    // Pricing: 3% per month simple
-    this.rate_per_period = 0.03;
+    // Pricing: default 3% per month simple, allow override via interestRatePercent
+    this.rate_per_period = this.interestRatePercent ? this.interestRatePercent / 100 : 0.03;
     const totalDue = Math.round(principal * (1 + this.rate_per_period * term));
     this.total_due_cents = totalDue;
     this.outstanding_cents = totalDue;

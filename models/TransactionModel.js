@@ -12,7 +12,7 @@ const transactionSchema = new Schema(
   {
     type: {
       type: String,
-      enum: ['mpesa_b2c', 'mpesa_c2b'],
+      enum: ['mpesa_b2c', 'mpesa_c2b', 'manual'],
       required: true,
       index: true,
     },
@@ -87,12 +87,20 @@ const transactionSchema = new Schema(
  */
 transactionSchema.index(
   { type: 1, mpesaReceipt: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    // Only enforce uniqueness when mpesaReceipt is present and not null
+    partialFilterExpression: { mpesaReceipt: { $exists: true, $ne: null } },
+  }
 );
 
 transactionSchema.index(
   { type: 1, idempotencyKey: 1 },
-  { unique: true, sparse: true }
+  {
+    unique: true,
+    // Only enforce uniqueness when idempotencyKey is present and not null
+    partialFilterExpression: { idempotencyKey: { $exists: true, $ne: null } },
+  }
 );
 
 /**

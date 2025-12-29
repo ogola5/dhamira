@@ -69,7 +69,7 @@ export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
       const amount_cents = tx.amount_cents;
 
       // Double-entry ledger
-      await LedgerEntry.create(
+      await LedgerEntry.insertMany(
         [
           {
             account: 'loans_receivable',
@@ -90,7 +90,7 @@ export const mpesaB2CResultCallback = asyncHandler(async (req, res) => {
             status: 'completed',
           },
         ],
-        { session }
+        { session, ordered: true }
       );
 
       // Loan lifecycle update

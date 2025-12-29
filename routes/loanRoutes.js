@@ -4,6 +4,7 @@ import {
   approveLoan,
   cancelLoan,
   getLoans,
+  groupPreflight,
 } from '../controllers/loanController.js';
 
 import { disburseLoan } from '../controllers/disbursementController.js';
@@ -29,6 +30,16 @@ router.post(
   protect,
   restrictTo('initiator_admin', 'loan_officer', 'super_admin'),
   initiateLoan
+);
+
+/**
+ * GROUP PREFLIGHT (checks group readiness for loan initiation)
+ */
+router.get(
+  '/group-preflight/:id',
+  protect,
+  restrictTo('initiator_admin', 'loan_officer', 'super_admin'),
+  groupPreflight
 );
 
 /**

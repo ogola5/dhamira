@@ -44,7 +44,7 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
 
   try {
     // 1. Record transaction
-    const [tx] = await Transaction.create(
+    const [tx] = await Transaction.insertMany(
       [
         {
           type: 'mpesa_c2b',
@@ -57,7 +57,7 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
           rawCallback: req.body,
         },
       ],
-      { session }
+      { session, ordered: true }
     );
 
     // 2. Allocate repayment
@@ -112,7 +112,7 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
       });
     }
 
-    await LedgerEntry.create(entries, { session });
+    await LedgerEntry.insertMany(entries, { session, ordered: true });
 
     // 🔥 APPLY TO REPAYMENT SCHEDULE (PRINCIPAL + INTEREST)
     await applyRepaymentToSchedule({

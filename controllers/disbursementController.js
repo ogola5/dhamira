@@ -33,7 +33,7 @@ export const disburseLoan = asyncHandler(async (req, res) => {
   session.startTransaction();
 
   try {
-    const tx = await Transaction.create(
+    const tx = await Transaction.insertMany(
       [
         {
           type: 'mpesa_b2c',
@@ -44,7 +44,7 @@ export const disburseLoan = asyncHandler(async (req, res) => {
           initiatedBy: req.user._id,
         },
       ],
-      { session }
+      { session, ordered: true }
     );
 
     loan.status = 'disbursement_pending';

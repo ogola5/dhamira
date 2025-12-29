@@ -5,6 +5,134 @@ import Loan from '../models/LoanModel.js';
 import Transaction from '../models/TransactionModel.js';
 import LedgerEntry from '../models/LedgerEntryModel.js';
 import { applyLoanLedger } from '../utils/applyLoanLedger.js';
+import { allocateRepaymentCents } from '../utils/repaymentAllocator.js';
+import { applyRepaymentToSchedule } from '../utils/applyRepaymentToSchedule.js';
+
+/**
+ * ============================
+ * CREATE REPAYMENT (MANUAL/CASH)
+ * ============================
+ */
+export const createRepayment = asyncHandler(async (req, res) => {
+  const { loanId, amount } = req.body;
+
+  if (!loanId || typeof amount === 'undefined') {
+    res.status(400);
+    throw new Error('loanId and amount are required');
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(loanId)) {
+    res.status(400);
+    throw new Error('Invalid loanId');
+  }
+
+  const loan = await Loan.findById(loanId);
+  if (!loan) {
+    res.status(404);
+    throw new Error('Loan not found');
+  }
+
+  const amount_cents = Math.round(Number(amount) * 100);
+  if (!Number.isFinite(amount_cents) || amount_cents <= 0) {
+    res.status(400);
+    throw new Error('Invalid amount');
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    // 1. Record transaction
+    const [tx] = await Transaction.insertMany(
+      [
+        {
+          type: 'manual',
+          direction: 'IN',
+          amount_cents,
+          status: 'success',
+          loanId: loan._id,
+          createdBy: req.user._id,
+          rawCallback: { source: 'manual', meta: req.body },
+        },
+      ],
+      { session, ordered: true }
+    );
+
+    // 2. Allocate repayment amounts (principal/interest/overpay)
+    const alloc = await allocateRepaymentCents({ loan, amount_cents, session });
+
+    // 3. Ledger entries
+    const entries = [
+      {
+        account: 'cash_mpesa',
+        direction: 'DEBIT',
+        amount_cents,
+        loanId: loan._id,
+        transactionId: tx._id,
+        entryType: 'repayment',
+        status: 'completed',
+      },
+    ];
+
+    if (alloc.interest_cents > 0) {
+      entries.push({
+        account: 'interest_income',
+        direction: 'CREDIT',
+        amount_cents: alloc.interest_cents,
+        loanId: loan._id,
+        transactionId: tx._id,
+        entryType: 'repayment',
+        status: 'completed',
+      });
+    }
+
+    if (alloc.principal_cents > 0) {
+      entries.push({
+        account: 'loans_receivable',
+        direction: 'CREDIT',
+        amount_cents: alloc.principal_cents,
+        loanId: loan._id,
+        transactionId: tx._id,
+        entryType: 'repayment',
+        status: 'completed',
+      });
+    }
+
+    if (alloc.overpay_cents > 0) {
+      entries.push({
+        account: 'suspense_overpay',
+        direction: 'CREDIT',
+        amount_cents: alloc.overpay_cents,
+        loanId: loan._id,
+        transactionId: tx._id,
+        entryType: 'repayment',
+        status: 'completed',
+      });
+    }
+
+    await LedgerEntry.insertMany(entries, { session, ordered: true });
+
+    // 4. Apply to repayment schedule (principal + interest)
+    await applyRepaymentToSchedule({
+      loanId: loan._id,
+      amount_cents: alloc.principal_cents + alloc.interest_cents,
+      session,
+    });
+
+    await session.commitTransaction();
+
+    // Update cached totals & loan status
+    await applyLoanLedger(loan._id);
+
+    res.status(201).json({ transaction: tx });
+  } catch (err) {
+    await session.abortTransaction();
+    res.status(500);
+    throw err;
+  } finally {
+    session.endSession();
+  }
+});
 
 /**
  * ============================
@@ -37,7 +165,7 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
 
   try {
     // Idempotency enforced by unique index
-    const tx = await Transaction.create(
+    const tx = await Transaction.insertMany(
       [
         {
           type: 'mpesa_c2b',
@@ -50,7 +178,7 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
           rawCallback: req.body,
         },
       ],
-      { session }
+      { session, ordered: true }
     );
 
     const principalPayment = Math.min(amount_cents, loan.outstanding_cents);
@@ -89,7 +217,7 @@ export const mpesaC2BCallback = asyncHandler(async (req, res) => {
       });
     }
 
-    await LedgerEntry.create(entries, { session });
+    await LedgerEntry.insertMany(entries, { session, ordered: true });
 
     await session.commitTransaction();
     await applyLoanLedger(loan._id);

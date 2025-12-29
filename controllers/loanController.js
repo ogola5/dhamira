@@ -31,16 +31,124 @@ async function computeCycleForClient(clientId, product) {
    INITIATE LOAN
 ============================= */
 export const initiateLoan = asyncHandler(async (req, res) => {
-  const { clientNationalId, product, amountKES, term, cycle } = req.body;
+  const { clientNationalId, groupId, product, amountKES, term, cycle } = req.body;
 
-  if (!clientNationalId || !product || !amountKES || !term) {
+  if (!product || !amountKES || !term) {
     res.status(400);
-    throw new Error('clientNationalId, product, amountKES, term are required');
+    throw new Error('product, amountKES, term are required');
   }
 
   if (!mustBeOneOf(req.user.role, ['initiator_admin', 'loan_officer', 'super_admin'])) {
     res.status(403);
     throw new Error('Access denied');
+  }
+
+  const principal_cents = Math.round(Number(amountKES) * 100);
+  if (!Number.isFinite(principal_cents) || principal_cents <= 0) {
+    res.status(400);
+    throw new Error('Invalid amountKES');
+  }
+
+  // GROUP-LEVEL initiation: create loans for all eligible members
+  if (groupId) {
+    const group = await Group.findById(groupId).populate('members');
+    if (!group) {
+      return res.status(400).json({ ok: false, reason: 'not_found', message: 'Group not found' });
+    }
+    if (group.status !== 'active') {
+      return res.status(400).json({ ok: false, reason: 'not_active', message: 'Group not active' });
+    }
+
+    if (!Array.isArray(group.signatories) || group.signatories.length !== 3) {
+      res.status(400);
+      throw new Error('Group must have exactly 3 signatories');
+    }
+
+    const memberCount = Array.isArray(group.members) ? group.members.length : 0;
+    if (product === 'fafa' && memberCount < 5) {
+      res.status(400);
+      throw new Error('FAFA requires group of 5+ members');
+    }
+    if (product === 'business' && memberCount < 7) {
+      res.status(400);
+      throw new Error('Business loan requires group of 7+ members');
+    }
+
+    const results = { created: [], skipped: [] };
+
+    for (const member of group.members) {
+      try {
+        const client = await Client.findById(member._id);
+        if (!client || client.status !== 'active') {
+          results.skipped.push({ clientId: member._id, reason: 'client not active or not found' });
+          continue;
+        }
+
+        // One active loan rule
+        const existing = await Loan.findOne({
+          clientId: client._id,
+          status: { $in: ['initiated', 'approved', 'disbursement_pending', 'disbursed'] },
+        });
+        if (existing) {
+          results.skipped.push({ clientId: client._id, reason: 'existing active loan' });
+          continue;
+        }
+
+        if (client.savings_balance_cents < Math.round(principal_cents * 0.2)) {
+          results.skipped.push({ clientId: client._id, reason: 'insufficient savings' });
+          continue;
+        }
+
+        const computedCycle = cycle ? Number(cycle) : await computeCycleForClient(client._id, product);
+
+        const loan = await Loan.create({
+          clientId: client._id,
+          groupId: group._id,
+          branchId: group.branchId,
+          product,
+          term: Number(term),
+          cycle: Number(computedCycle),
+          principal_cents,
+          loanType: 'individual',
+          purpose: req.body.purpose || '',
+          interestRatePercent: req.body.interestRatePercent || null,
+          initiatedBy: req.user._id,
+        });
+
+        // Attach guarantors for this loan if provided (optional for group flow)
+        if (Array.isArray(req.body.guarantors) && req.body.guarantors.length > 0) {
+          for (const g of req.body.guarantors) {
+            try {
+              const guarantorClient = await Client.findOne({ nationalId: String(g.clientNationalId).trim() });
+              if (!guarantorClient) continue;
+              await Guarantor.create({
+                loanId: loan._id,
+                clientId: guarantorClient._id,
+                relationship: g.relationship || 'unknown',
+                external: g.external !== undefined ? !!g.external : true,
+                idCopyUrl: g.idCopyUrl || '/uploads/placeholder-id.jpg',
+                photoUrl: g.photoUrl || '/uploads/placeholder-client.jpg',
+                eligibility: { hasRepaidFafaBefore: !!g.hasRepaidFafaBefore },
+              });
+            } catch (e) {
+              // continue on guarantor creation errors
+            }
+          }
+        }
+
+        results.created.push({ clientId: client._id, loanId: loan._id, application_fee_cents: loan.application_fee_cents });
+      } catch (err) {
+        results.skipped.push({ clientId: member._id, reason: err.message || 'error creating loan' });
+      }
+    }
+
+    return res.status(201).json({ message: 'Group loan initiation complete', results });
+  }
+
+  // CLIENT-LEVEL initiation (existing behaviour)
+  if (!clientNationalId) {
+    res.status(400);
+    throw new Error('clientNationalId is required for single-client initiation');
   }
 
   const client = await Client.findOne({ nationalId: String(clientNationalId).trim() });
@@ -86,12 +194,6 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     throw new Error('Business loan requires group of 7+ members');
   }
 
-  const principal_cents = Math.round(Number(amountKES) * 100);
-  if (!Number.isFinite(principal_cents) || principal_cents <= 0) {
-    res.status(400);
-    throw new Error('Invalid amountKES');
-  }
-
   if (client.savings_balance_cents < Math.round(principal_cents * 0.2)) {
     res.status(400);
     throw new Error('Client must have at least 20% savings');
@@ -109,13 +211,43 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     term: Number(term),
     cycle: Number(computedCycle),
     principal_cents,
+    loanType: 'individual',
+    purpose: req.body.purpose || '',
+    interestRatePercent: req.body.interestRatePercent || null,
     initiatedBy: req.user._id,
   });
+  // Create guarantors (required: at least 3)
+  const guarantors = req.body.guarantors;
+  if (!Array.isArray(guarantors) || guarantors.length < 3) {
+    res.status(400);
+    throw new Error('At least 3 guarantors are required for loan application');
+  }
+
+  const createdGuarantors = [];
+  for (const g of guarantors) {
+    const guarantorClient = await Client.findOne({ nationalId: String(g.clientNationalId).trim() });
+    if (!guarantorClient) {
+      res.status(400);
+      throw new Error(`Guarantor not found: ${g.clientNationalId}`);
+    }
+
+    const gu = await Guarantor.create({
+      loanId: loan._id,
+      clientId: guarantorClient._id,
+      relationship: g.relationship || 'unknown',
+      external: g.external !== undefined ? !!g.external : true,
+      idCopyUrl: g.idCopyUrl || '/uploads/placeholder-id.jpg',
+      photoUrl: g.photoUrl || '/uploads/placeholder-client.jpg',
+      eligibility: { hasRepaidFafaBefore: !!g.hasRepaidFafaBefore },
+    });
+    createdGuarantors.push(gu);
+  }
 
   res.status(201).json({
     message: 'Loan initiated',
     loan,
     application_fee_cents: loan.application_fee_cents,
+    guarantors: createdGuarantors,
   });
 });
 
@@ -223,4 +355,48 @@ export const getLoans = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 });
 
   res.json(loans);
+});
+
+/**
+ * =============================
+ * GROUP PREFLIGHT
+ * Returns validation details for a group before initiating group loans
+ * Query param: product (fafa|business) to validate product-specific size rules
+ * =============================
+ */
+export const groupPreflight = asyncHandler(async (req, res) => {
+  const groupId = req.params.id;
+  const product = req.query.product || 'fafa';
+
+  if (!mongoose.Types.ObjectId.isValid(groupId)) {
+    res.status(400);
+    throw new Error('Invalid group id');
+  }
+
+  const group = await Group.findById(groupId).populate('members');
+  if (!group) {
+    res.status(404).json({ ok: false, reason: 'not_found' });
+    return;
+  }
+
+  const issues = [];
+  if (group.status !== 'active') issues.push('group_not_active');
+  const signCount = Array.isArray(group.signatories) ? group.signatories.length : 0;
+  if (signCount !== 3) issues.push('signatories_missing');
+
+  const memberCount = Array.isArray(group.members) ? group.members.length : 0;
+  if (product === 'fafa' && memberCount < 5) issues.push('insufficient_members_fafa');
+  if (product === 'business' && memberCount < 7) issues.push('insufficient_members_business');
+
+  res.json({
+    ok: issues.length === 0,
+    group: {
+      id: group._id,
+      name: group.name,
+      status: group.status,
+      memberCount,
+      signatoriesCount: signCount,
+    },
+    issues,
+  });
 });
