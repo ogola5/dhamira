@@ -39,9 +39,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Enable CORS for frontend origin (adjust as needed)
+// Supports a single origin or a comma-separated list in `CORS_ORIGIN`.
+const rawCors = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const allowedOrigins = rawCors.split(',').map((s) => s.trim()).filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g., server-to-server, Postman)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('CORS policy: origin not allowed'));
+    },
     credentials: true,
   })
 );
