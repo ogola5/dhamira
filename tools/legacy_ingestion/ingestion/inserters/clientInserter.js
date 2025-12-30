@@ -57,12 +57,24 @@ export async function insertClients(
     }
 
     // ---------------- INSERT ----------------
+    // Resolve group to obtain branchId and loanOfficer (required fields)
+    const Group = (await import('../../models/GroupModel.js')).default;
+    const group = await Group.findById(groupId).select('branchId loanOfficer');
+    if (!group) {
+      throw new Error(`Row ${i + 2}: Group not found by id ${groupId}`);
+    }
+
+    const loanOfficer = group.loanOfficer || createdBy;
+    const branchId = group.branchId;
+
     await Client.create({
       name: row.name,
       nationalId: row.nationalId,
       phone: row.phone,
 
       groupId,
+      branchId,
+      loanOfficer,
 
       businessType: row.businessType,
       businessLocation: row.businessLocation,

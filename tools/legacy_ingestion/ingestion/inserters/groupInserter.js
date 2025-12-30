@@ -32,14 +32,14 @@ export async function insertGroups(groups, createdBy, dryRun = false) {
       continue;
     }
 
-    // 2. Insert
+    // 2. Insert — set loanOfficer to createdBy as fallback for legacy imports
     await Group.create({
       name: g.groupName,
       branchId: g.branchId,
 
       meetingDay: null,
       meetingTime: null,
-      loanOfficer: null,
+      loanOfficer: createdBy,
       signatories: [],
       members: [],
 

@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import Client from '../models/ClientModel.js';
 import Group from '../models/GroupModel.js';
 import Loan from '../models/LoanModel.js';
+import Transaction from '../models/TransactionModel.js';
 
 /**
  * ============================
@@ -112,13 +113,12 @@ export const onboardClient = asyncHandler(async (req, res) => {
         throw new Error('Invalid amount');
       }
 
-      client.savings_balance_cents = (client.savings_balance_cents || 0) + cents;
-      // mark initial savings flag if not already
-      if (!client.initialSavingsPaid) client.initialSavingsPaid = true;
+      const update = { savings_balance_cents: (client.savings_balance_cents || 0) + cents };
+      if (!client.initialSavingsPaid) update.initialSavingsPaid = true;
 
-      await client.save();
+      const updated = await Client.findByIdAndUpdate(clientId, { $set: update }, { new: true });
 
-      res.json({ message: 'Savings added', client });
+      res.json({ message: 'Savings added', client: updated || client });
     });
 export const approveClient = asyncHandler(async (req, res) => {
   const client = await Client.findById(req.params.id);
@@ -137,12 +137,15 @@ export const approveClient = asyncHandler(async (req, res) => {
     throw new Error('Client must be pending to approve');
   }
 
-  client.status = 'active';
-  client.approvedBy = req.user._id;
-  client.registrationDate = new Date();
+  const updated = await Client.findByIdAndUpdate(req.params.id, {
+    $set: {
+      status: 'active',
+      approvedBy: req.user._id,
+      registrationDate: new Date(),
+    },
+  }, { new: true });
 
-  await client.save();
-  res.json({ message: 'Client approved', client });
+  res.json({ message: 'Client approved', client: updated || client });
 });
 
 /**
@@ -180,6 +183,58 @@ export const getClients = asyncHandler(async (req, res) => {
     totalPages,
     data: clients,
   });
+});
+
+/**
+ * ============================
+ * GET CLIENT HISTORY (REPAYMENTS)
+ * ============================
+ */
+export const getClientHistory = asyncHandler(async (req, res) => {
+  const clientId = req.params.id;
+
+  if (!clientId || !clientId.match(/^[0-9a-fA-F]{24}$/)) {
+    res.status(400);
+    throw new Error('Invalid client id');
+  }
+
+  const client = await Client.findById(clientId);
+  if (!client) {
+    res.status(404);
+    throw new Error('Client not found');
+  }
+
+  // Authorization: loan officers may only view their own clients
+  if (req.user.role === 'loan_officer' && String(client.loanOfficer) !== String(req.user._id)) {
+    res.status(403);
+    throw new Error('Access denied');
+  }
+
+  // Find loans for this client
+  const loans = await Loan.find({ clientId }).select('_id status amount_cents outstanding_cents total_paid_cents');
+  const loanIds = loans.map((l) => l._id);
+
+  // Find repayments (successful mpesa c2b transactions) for those loans
+  const repayments = await Transaction.find({ loanId: { $in: loanIds }, type: 'mpesa_c2b', status: 'success' }).sort({ createdAt: -1 });
+
+  // Group repayments by loanId
+  const grouped = repayments.reduce((acc, r) => {
+    const k = String(r.loanId);
+    if (!acc[k]) acc[k] = [];
+    acc[k].push(r);
+    return acc;
+  }, {});
+
+  const data = loans.map((l) => ({
+    loanId: l._id,
+    status: l.status,
+    amount_cents: l.amount_cents,
+    total_paid_cents: l.total_paid_cents,
+    outstanding_cents: l.outstanding_cents,
+    repayments: grouped[String(l._id)] || [],
+  }));
+
+  res.json({ clientId, loans: data });
 });
 
 /**

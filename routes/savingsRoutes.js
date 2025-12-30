@@ -1,9 +1,10 @@
 import express from 'express';
-import { createSavings } from '../controllers/savingsController.js';
+import { createSavings, listSavings } from '../controllers/savingsController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-router.post('/', protect, restrictTo('initiator_admin', 'super_admin'), createSavings);
+router.post('/', protect, restrictTo('approver_admin', 'super_admin'), createSavings);
+router.get('/', protect, restrictTo('approver_admin', 'super_admin'), listSavings);
 
 export default router;

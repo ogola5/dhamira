@@ -8,6 +8,7 @@ import {
   deactivateClient,
   searchClients,
   addSavings,
+  getClientHistory,
 } from '../controllers/clientController.js';
 
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
@@ -61,6 +62,16 @@ router.post(
   protect,
   restrictTo('initiator_admin', 'super_admin'),
   addSavings
+);
+
+/**
+ * VIEW CLIENT HISTORY (repayments grouped by loan)
+ */
+router.get(
+  '/:id/history',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  getClientHistory
 );
 
 /**
