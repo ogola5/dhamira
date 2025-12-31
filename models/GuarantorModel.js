@@ -6,17 +6,24 @@ const guarantorSchema = new Schema(
   {
     loanId: { type: Schema.Types.ObjectId, ref: 'Loan', required: true, index: true },
 
-    // MVP: guarantor must be a known Client in system
-    clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
+    // If the guarantor is a registered client, `clientId` links to that document.
+    // For external guarantors (not registered as clients), store identifying
+    // fields here and set `clientId` to null.
+    clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: false, index: true },
 
-    relationship: { type: String, required: true, trim: true },
+    // External guarantor information (optional when clientId is present)
+    guarantorName: { type: String, trim: true },
+    guarantorNationalId: { type: String, trim: true, index: true },
+    guarantorPhone: { type: String, trim: true },
 
-    // Policy: external guarantor required (serviced FAFA before)
+    relationship: { type: String, required: false, trim: true, default: 'unknown' },
+
+    // Policy: whether guarantor is external to the system
     external: { type: Boolean, default: true, index: true },
 
-    // Evidence
-    idCopyUrl: { type: String, required: true, trim: true },
-    photoUrl: { type: String, required: true, trim: true },
+    // Evidence (optional)
+    idCopyUrl: { type: String, trim: true },
+    photoUrl: { type: String, trim: true },
 
     // Eligibility snapshot at time of add
     eligibility: {
@@ -32,8 +39,17 @@ const guarantorSchema = new Schema(
   { timestamps: true }
 );
 
-// Prevent same guarantor being added twice for same loan
-guarantorSchema.index({ loanId: 1, clientId: 1 }, { unique: true });
+// Prevent same guarantor being added twice for same loan when clientId is present
+guarantorSchema.index(
+  { loanId: 1, clientId: 1 },
+  { unique: true, partialFilterExpression: { clientId: { $exists: true, $ne: null } } }
+);
+
+// Prevent duplicate external guarantors for same loan by nationalId
+guarantorSchema.index(
+  { loanId: 1, guarantorNationalId: 1 },
+  { unique: true, partialFilterExpression: { guarantorNationalId: { $exists: true, $ne: null } } }
+);
 
 // Fetch accepted guarantors quickly
 guarantorSchema.index({ loanId: 1, accepted: 1 });

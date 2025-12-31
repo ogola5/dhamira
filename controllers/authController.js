@@ -89,4 +89,45 @@ const register = asyncHandler(async (req, res) => {
   });
 });
 
-export { login, register };
+// PUT /api/auth/change-password
+const changePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    res.status(400);
+    throw new Error('currentPassword, newPassword and confirmPassword are required');
+  }
+
+  if (newPassword !== confirmPassword) {
+    res.status(400);
+    throw new Error('New password and confirmation do not match');
+  }
+
+  if (String(newPassword).length < 8) {
+    res.status(400);
+    throw new Error('Password must be at least 8 characters');
+  }
+
+  // req.user is attached by auth middleware
+  const user = await userModel.findById(req.user._id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User not found');
+  }
+
+  const match = await user.matchPassword(currentPassword);
+  if (!match) {
+    res.status(401);
+    throw new Error('Current password is incorrect');
+  }
+
+  user.password = newPassword;
+  await user.save();
+
+  // Issue a fresh token
+  const token = signToken(user);
+
+  res.json({ message: 'Password updated', token });
+});
+
+export { login, register, changePassword };

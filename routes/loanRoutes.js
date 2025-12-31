@@ -6,6 +6,7 @@ import {
   getLoans,
   groupPreflight,
 } from '../controllers/loanController.js';
+import { markApplicationFeePaid, markApplicationFeePaidBulk } from '../controllers/loanController.js';
 
 import { disburseLoan } from '../controllers/disbursementController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
@@ -70,6 +71,26 @@ router.post(
   protect,
   restrictTo('approver_admin', 'super_admin'),
   disburseLoan
+);
+
+// Mark application fee paid for a loan
+router.put('/:id/mark-application-fee-paid', protect, restrictTo('initiator_admin', 'approver_admin', 'super_admin'), markApplicationFeePaid);
+
+// Bulk mark application fees paid
+router.post('/mark-application-fee-paid-bulk', protect, restrictTo('initiator_admin', 'approver_admin', 'super_admin'), markApplicationFeePaidBulk);
+
+/**
+ * LOAN DETAIL
+ */
+router.get(
+  '/:id',
+  protect,
+  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  // lazy import to avoid circular issues
+  async (req, res, next) => {
+    const { getLoanDetail } = await import('../controllers/loanController.js');
+    return getLoanDetail(req, res, next);
+  }
 );
 
 export default router;

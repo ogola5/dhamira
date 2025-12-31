@@ -23,6 +23,7 @@ import guarantorRoutes from './routes/guarantorRoutes.js';
 import creditAssessmentRoutes from './routes/creditAssessmentRoutes.js';
 import analysisRoutes from './routes/analysisRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import logsRoutes from './routes/logsRoutes.js';
 
 // 🔥 M-PESA ROUTES (CRITICAL)
 import mpesaRoutes from './routes/mpesaRoutes.js';
@@ -84,6 +85,7 @@ app.use('/api/savings', savingsRoutes);
 // Optional / analytics
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/logs', logsRoutes);
 
 // -------------------------
 // Health Check
