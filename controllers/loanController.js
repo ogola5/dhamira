@@ -492,6 +492,198 @@ export const getLoans = asyncHandler(async (req, res) => {
   res.json({ page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), data: loans });
 });
 
+/* =============================
+   LOAN HISTORY (SUPER ADMIN ONLY)
+   Complete loan history with statistics by status
+============================= */
+export const getLoanHistory = asyncHandler(async (req, res) => {
+  // Filters
+  const { status, product, loanType, startDate, endDate, search } = req.query;
+  const match = {};
+
+  if (status) match.status = status;
+  if (product) match.product = product;
+  if (loanType) match.loanType = loanType;
+  if (startDate || endDate) {
+    match.createdAt = {};
+    if (startDate) match.createdAt.$gte = new Date(startDate);
+    if (endDate) match.createdAt.$lte = new Date(endDate);
+  }
+
+  // Pagination
+  const page = Number(req.query.page) || 1;
+  const limit = Math.min(Number(req.query.limit) || 50, 1000);
+  const skip = (page - 1) * limit;
+
+  // Statistics by status
+  const statusStats = await Loan.aggregate([
+    {
+      $group: {
+        _id: '$status',
+        count: { $sum: 1 },
+        totalPrincipal: { $sum: '$principal_cents' },
+        totalDue: { $sum: '$total_due_cents' },
+        totalPaid: { $sum: '$total_paid_cents' },
+        totalOutstanding: { $sum: '$outstanding_cents' },
+      },
+    },
+  ]);
+
+  // Product breakdown
+  const productStats = await Loan.aggregate([
+    {
+      $group: {
+        _id: '$product',
+        count: { $sum: 1 },
+        totalPrincipal: { $sum: '$principal_cents' },
+      },
+    },
+  ]);
+
+  // Get filtered loans
+  const [total, loans] = await Promise.all([
+    Loan.countDocuments(match),
+    Loan.find(match)
+      .populate('clientId', 'name nationalId phone branchId')
+      .populate('groupId', 'name')
+      .populate('initiatedBy', 'username role')
+      .populate('approvedBy', 'username role')
+      .populate('disbursedBy', 'username role')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+  ]);
+
+  // Overall statistics
+  const totalStats = await Loan.aggregate([
+    {
+      $group: {
+        _id: null,
+        totalLoans: { $sum: 1 },
+        totalPrincipal: { $sum: '$principal_cents' },
+        totalDue: { $sum: '$total_due_cents' },
+        totalPaid: { $sum: '$total_paid_cents' },
+        totalOutstanding: { $sum: '$outstanding_cents' },
+      },
+    },
+  ]);
+
+  res.json({
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+    data: loans,
+    statistics: {
+      overall: totalStats[0] || {
+        totalLoans: 0,
+        totalPrincipal: 0,
+        totalDue: 0,
+        totalPaid: 0,
+        totalOutstanding: 0,
+      },
+      byStatus: statusStats,
+      byProduct: productStats,
+    },
+  });
+});
+
+/* =============================
+   TRACK MY LOANS (LOAN OFFICER)
+   Shows loans for groups assigned to the loan officer
+============================= */
+export const trackMyLoans = asyncHandler(async (req, res) => {
+  // Get groups assigned to this loan officer
+  const myGroups = await Group.find({ loanOfficer: req.user._id }).select('_id name');
+  const groupIds = myGroups.map(g => g._id);
+
+  if (groupIds.length === 0) {
+    return res.json({
+      page: 1,
+      limit: 20,
+      total: 0,
+      totalPages: 0,
+      data: [],
+      myGroups: [],
+      statistics: {
+        totalLoans: 0,
+        byStatus: [],
+        totalPrincipal: 0,
+        totalOutstanding: 0,
+      },
+    });
+  }
+
+  // Filters
+  const { status, product, groupId } = req.query;
+  const match = { groupId: { $in: groupIds } };
+
+  if (status) match.status = status;
+  if (product) match.product = product;
+  if (groupId && mongoose.Types.ObjectId.isValid(groupId)) {
+    match.groupId = new mongoose.Types.ObjectId(groupId);
+  }
+
+  // Pagination
+  const page = Number(req.query.page) || 1;
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+  const skip = (page - 1) * limit;
+
+  // Statistics for my loans
+  const statusStats = await Loan.aggregate([
+    { $match: { groupId: { $in: groupIds } } },
+    {
+      $group: {
+        _id: '$status',
+        count: { $sum: 1 },
+        totalPrincipal: { $sum: '$principal_cents' },
+        totalOutstanding: { $sum: '$outstanding_cents' },
+      },
+    },
+  ]);
+
+  // Get my loans
+  const [total, loans] = await Promise.all([
+    Loan.countDocuments(match),
+    Loan.find(match)
+      .populate('clientId', 'name nationalId phone')
+      .populate('groupId', 'name')
+      .populate('initiatedBy', 'username')
+      .populate('approvedBy', 'username')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+  ]);
+
+  // Overall stats for my loans
+  const overallStats = await Loan.aggregate([
+    { $match: { groupId: { $in: groupIds } } },
+    {
+      $group: {
+        _id: null,
+        totalLoans: { $sum: 1 },
+        totalPrincipal: { $sum: '$principal_cents' },
+        totalOutstanding: { $sum: '$outstanding_cents' },
+      },
+    },
+  ]);
+
+  res.json({
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+    data: loans,
+    myGroups: myGroups.map(g => ({ id: g._id, name: g.name })),
+    statistics: {
+      totalLoans: overallStats[0]?.totalLoans || 0,
+      totalPrincipal: overallStats[0]?.totalPrincipal || 0,
+      totalOutstanding: overallStats[0]?.totalOutstanding || 0,
+      byStatus: statusStats,
+    },
+  });
+});
+
 /**
  * GET /api/loans/:id
  * Returns detailed loan information including guarantors, repayment schedule,

@@ -5,6 +5,8 @@ import {
   cancelLoan,
   getLoans,
   groupPreflight,
+  getLoanHistory,
+  trackMyLoans,
 } from '../controllers/loanController.js';
 import { markApplicationFeePaid, markApplicationFeePaidBulk } from '../controllers/loanController.js';
 
@@ -12,6 +14,28 @@ import { disburseLoan } from '../controllers/disbursementController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+/**
+ * LOAN HISTORY (SUPER ADMIN ONLY)
+ * Complete loan history with statistics
+ */
+router.get(
+  '/history',
+  protect,
+  restrictTo('super_admin'),
+  getLoanHistory
+);
+
+/**
+ * TRACK MY LOANS (LOAN OFFICER)
+ * Shows loans for groups assigned to the loan officer
+ */
+router.get(
+  '/my-loans',
+  protect,
+  restrictTo('loan_officer'),
+  trackMyLoans
+);
 
 /**
  * LIST LOANS

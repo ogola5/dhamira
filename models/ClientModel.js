@@ -23,7 +23,6 @@ const clientSchema = new Schema(
       required: true,
       unique: true,
       set: normalize,
-      index: true,
     },
 
     phone: {

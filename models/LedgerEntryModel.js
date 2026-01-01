@@ -46,7 +46,6 @@ const ledgerEntrySchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Transaction',
       required: true,
-      index: true,
     },
 
     entryType: {
