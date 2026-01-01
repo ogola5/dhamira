@@ -14,7 +14,6 @@ router.post(
 router.get(
   '/',
   protect,
-  restrictTo('loan_officer', 'initiator_admin', 'approver_admin', 'super_admin'),
   getGuarantors
 );
 

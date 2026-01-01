@@ -69,9 +69,27 @@ const protect = asyncHandler(async (req, res, next) => {
     req.userRegions = decoded.regions || [];
 
     next();
-  } catch {
-    res.status(401);
-    throw new Error('Not authorized, token invalid');
+  } catch (error) {
+    // Handle specific JWT errors
+    if (error.name === 'TokenExpiredError') {
+      res.status(401);
+      const err = new Error('Token expired, please login again');
+      err.code = 'TOKEN_EXPIRED';
+      throw err;
+    } else if (error.name === 'JsonWebTokenError') {
+      res.status(401);
+      const err = new Error('Invalid token, please login again');
+      err.code = 'TOKEN_INVALID';
+      throw err;
+    } else if (error.name === 'NotBeforeError') {
+      res.status(401);
+      const err = new Error('Token not active yet');
+      err.code = 'TOKEN_NOT_ACTIVE';
+      throw err;
+    } else {
+      res.status(401);
+      throw new Error('Not authorized, token invalid');
+    }
   }
 });
 

@@ -55,8 +55,15 @@ app.use(
       return callback(new Error('CORS policy: origin not allowed'));
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    maxAge: 86400, // 24 hours
   })
 );
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 // -------------------------
 // Static files (uploads)
@@ -111,6 +118,7 @@ app.use((err, req, res, next) => {
 
   res.status(statusCode).json({
     message: err.message,
+    code: err.code || undefined, // Include error code for frontend handling
     stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
   });
 });

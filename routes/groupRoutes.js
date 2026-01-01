@@ -19,7 +19,6 @@ const router = express.Router();
 router.get(
   '/',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
   getGroups
 );
 
@@ -39,7 +38,6 @@ router.post(
 router.get(
   '/:id',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
   getGroupById
 );
 
