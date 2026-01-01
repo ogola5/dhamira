@@ -23,6 +23,7 @@ import guarantorRoutes from './routes/guarantorRoutes.js';
 import creditAssessmentRoutes from './routes/creditAssessmentRoutes.js';
 import analysisRoutes from './routes/analysisRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
+import loanOfficerRoutes from './routes/loanOfficerRoutes.js';
 import logsRoutes from './routes/logsRoutes.js';
 
 // 🔥 M-PESA ROUTES (CRITICAL)
@@ -86,6 +87,8 @@ app.use('/api/savings', savingsRoutes);
 app.use('/api/analysis', analysisRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/logs', logsRoutes);
+// Loan officers management (super_admin)
+app.use('/api/loan-officers', loanOfficerRoutes);
 
 // -------------------------
 // Health Check

@@ -40,6 +40,18 @@ const login = asyncHandler(async (req, res) => {
 
   const token = signToken(user);
 
+  // Set token as an HTTP-only cookie so frontend pages (including nested frames)
+  // can reuse the session without needing to manually attach Authorization headers.
+  // Frontend may still read the token from the JSON response when necessary.
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000, // 1 day
+  };
+
+  res.cookie('token', token, cookieOptions);
+
   res.json({
     _id: user._id,
     username: user.username,

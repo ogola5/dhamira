@@ -29,6 +29,23 @@ const protect = asyncHandler(async (req, res, next) => {
     token = req.headers.authorization.split(' ')[1];
   }
 
+  // If no Authorization header, try to read token from cookies.
+  // We don't require `cookie-parser`; parse `req.headers.cookie` manually.
+  if (!token && req.headers && req.headers.cookie) {
+    const raw = req.headers.cookie.split(';').map(c => c.trim());
+    for (const part of raw) {
+      if (part.startsWith('token=')) {
+        token = part.slice('token='.length);
+        break;
+      }
+      // also support cookie named 'jwt'
+      if (part.startsWith('jwt=')) {
+        token = part.slice('jwt='.length);
+        break;
+      }
+    }
+  }
+
   if (!token) {
     res.status(401);
     throw new Error('Not authorized, no token');

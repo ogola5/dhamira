@@ -29,6 +29,23 @@ async function computeCycleForClient(clientId, product) {
   return next;
 }
 
+// Normalize guarantors input into an array of guarantor objects/strings.
+function normalizeGuarantors(input) {
+  if (!input) return [];
+  if (Array.isArray(input)) return input;
+  if (typeof input === 'string') return [input];
+  if (typeof input === 'object') {
+    // If object with numeric keys {0: {...}, 1: {...}}
+    const keys = Object.keys(input);
+    const numeric = keys.every(k => String(Number(k)) === k);
+    if (numeric) return keys.sort((a,b) => Number(a)-Number(b)).map(k => input[k]);
+    // If object already shaped like { guarantor0: {...}, guarantor1: {...} }
+    const vals = keys.map(k => input[k]).filter(v => v !== undefined && v !== null);
+    if (vals.length > 0) return vals;
+  }
+  return [];
+}
+
 // Helper: normalize guarantor input (accepts string or object) and create Guarantor
 async function createGuarantorEntry(loanId, g, initiatedBy) {
   // g may be a string (nationalId) or an object
@@ -177,16 +194,18 @@ export const initiateLoan = asyncHandler(async (req, res) => {
           initiatedBy: req.user._id,
         });
 
-        // Attach guarantors for this loan if provided (optional for group flow)
-        if (Array.isArray(req.body.guarantors) && req.body.guarantors.length > 0) {
-          for (const g of req.body.guarantors) {
-            try {
-              await createGuarantorEntry(loan._id, g, req.user._id);
-            } catch (e) {
-              // continue on guarantor creation errors
+            // Attach guarantors for this loan if provided (optional for group flow)
+            const groupGuarantors = normalizeGuarantors(req.body.guarantors);
+            console.log('Group initiation - received guarantors:', groupGuarantors.length);
+            if (groupGuarantors.length > 0) {
+              for (const g of groupGuarantors) {
+                try {
+                  await createGuarantorEntry(loan._id, g, req.user._id);
+                } catch (e) {
+                  // continue on guarantor creation errors
+                }
+              }
             }
-          }
-        }
 
         results.created.push({ clientId: client._id, loanId: loan._id, application_fee_cents: loan.application_fee_cents });
       } catch (err) {
@@ -271,7 +290,8 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     initiatedBy: req.user._id,
   });
   // Create guarantors (required: at least 3)
-  const guarantors = req.body.guarantors;
+  const guarantors = normalizeGuarantors(req.body.guarantors);
+  console.log('Client initiation - received guarantors:', guarantors.length, guarantors);
   if (!Array.isArray(guarantors) || guarantors.length < 3) {
     res.status(400);
     throw new Error('At least 3 guarantors are required for loan application');

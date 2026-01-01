@@ -88,3 +88,18 @@ const acceptGuarantor = asyncHandler(async (req, res) => {
 });
 
 export { addGuarantor, acceptGuarantor };
+
+// GET /api/guarantors?loanId=...
+const getGuarantors = asyncHandler(async (req, res) => {
+  const { loanId } = req.query;
+  if (!loanId) {
+    res.status(400);
+    throw new Error('loanId query parameter is required');
+  }
+
+  const guarantors = await Guarantor.find({ loanId }).populate({ path: 'clientId', select: 'firstName lastName nationalId phone' }).lean();
+
+  res.json({ data: guarantors });
+});
+
+export { getGuarantors };

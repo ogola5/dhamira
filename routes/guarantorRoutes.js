@@ -1,5 +1,5 @@
 import express from 'express';
-import { addGuarantor, acceptGuarantor } from '../controllers/guarantorController.js';
+import { addGuarantor, acceptGuarantor, getGuarantors } from '../controllers/guarantorController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -9,6 +9,13 @@ router.post(
   protect,
   restrictTo('loan_officer', 'initiator_admin', 'super_admin'),
   addGuarantor
+);
+
+router.get(
+  '/',
+  protect,
+  restrictTo('loan_officer', 'initiator_admin', 'approver_admin', 'super_admin'),
+  getGuarantors
 );
 
 router.put(
