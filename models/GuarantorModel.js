@@ -39,16 +39,22 @@ const guarantorSchema = new Schema(
   { timestamps: true }
 );
 
-// Prevent same guarantor being added twice for same loan when clientId is present
+// Prevent same guarantor (registered client) being added twice for same loan
+// Only applies when clientId is present (non-null)
 guarantorSchema.index(
   { loanId: 1, clientId: 1 },
-  { unique: true, partialFilterExpression: { clientId: { $exists: true, $ne: null } } }
+  { 
+    unique: true, 
+    partialFilterExpression: { 
+      clientId: { $type: 'objectId' } 
+    } 
+  }
 );
 
 // Prevent duplicate external guarantors for same loan by nationalId
 guarantorSchema.index(
   { loanId: 1, guarantorNationalId: 1 },
-  { unique: true, partialFilterExpression: { guarantorNationalId: { $exists: true, $ne: null } } }
+  { unique: true, partialFilterExpression: { guarantorNationalId: { $type: 'string', $gt: '' } } }
 );
 
 // Fetch accepted guarantors quickly

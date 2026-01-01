@@ -5,7 +5,7 @@ const { Schema } = mongoose;
 const loanSchema = new Schema(
   {
     clientId: { type: Schema.Types.ObjectId, ref: 'Client', required: true, index: true },
-    groupId: { type: Schema.Types.ObjectId, ref: 'Group', required: true, index: true },
+    groupId: { type: Schema.Types.ObjectId, ref: 'Group', required: false, default: null, index: true },
     branchId: { type: Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
 
     // Product types aligned to your policy doc

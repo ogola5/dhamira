@@ -5,10 +5,19 @@ import {
   submitQuickAssessment,
   getAssessmentByLoan,
   listMyAssessments,
+  listPendingAssessments,
 } from '../controllers/creditAssessmentController.js';
 import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
+
+// List loans pending credit assessment (no assessment yet)
+router.get(
+  '/',
+  protect,
+  restrictTo('loan_officer', 'approver_admin', 'initiator_admin', 'super_admin'),
+  listPendingAssessments
+);
 
 // List assessments created by the logged-in user
 router.get('/mine', protect, listMyAssessments);

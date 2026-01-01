@@ -66,7 +66,7 @@ router.put(
 /**
  * DISBURSE LOAN
  */
-router.post(
+router.put(
   '/:id/disburse',
   protect,
   restrictTo('approver_admin', 'super_admin'),

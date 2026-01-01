@@ -148,4 +148,34 @@ const listMyAssessments = asyncHandler(async (req, res) => {
   res.json({ data: assessments });
 });
 
-export { submitCreditAssessment, submitQuickAssessment, getAssessmentByLoan, listMyAssessments };
+// GET /api/credit-assessments
+// List all loans pending credit assessment (initiated loans without assessment)
+// Access: loan_officer + admins
+const listPendingAssessments = asyncHandler(async (req, res) => {
+  // Find all loans in 'initiated' status
+  const initiatedLoans = await LoanModel.find({ status: 'initiated' })
+    .populate('clientId', 'name nationalId phone')
+    .populate('groupId', 'name')
+    .sort({ createdAt: -1 });
+
+  // Get all loanIds that already have assessments
+  const assessedLoanIds = await CreditAssessmentModel.distinct('loanId');
+
+  // Filter out loans that already have assessments
+  const pending = initiatedLoans.filter(
+    loan => !assessedLoanIds.some(id => String(id) === String(loan._id))
+  );
+
+  res.json({ 
+    total: pending.length,
+    data: pending 
+  });
+});
+
+export { 
+  submitCreditAssessment, 
+  submitQuickAssessment, 
+  getAssessmentByLoan, 
+  listMyAssessments,
+  listPendingAssessments 
+};

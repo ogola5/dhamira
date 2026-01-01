@@ -54,26 +54,46 @@ async function createGuarantorEntry(loanId, g, initiatedBy) {
   const phone = typeof g === 'object' ? g.phone || null : null;
   const relationship = typeof g === 'object' ? (g.relationship || 'unknown') : 'unknown';
 
-  // Try to find an existing client by nationalId
+  // Try to resolve to an existing client using several fallbacks:
+  // 1. explicit `clientId` supplied in payload
+  // 2. `nationalId` provided
+  // 3. `phone` match
   let guarantorClient = null;
-  if (rawNationalId) {
+
+  if (typeof g === 'object' && g.clientId && mongoose.Types.ObjectId.isValid(String(g.clientId))) {
+    guarantorClient = await Client.findById(String(g.clientId));
+  }
+
+  if (!guarantorClient && rawNationalId) {
     guarantorClient = await Client.findOne({ nationalId: String(rawNationalId).trim() });
+  }
+
+  if (!guarantorClient && phone) {
+    guarantorClient = await Client.findOne({ phone: String(phone).trim() });
   }
 
   if (guarantorClient) {
     // Create guarantor linked to existing client
-    return await Guarantor.create({
-      loanId,
-      clientId: guarantorClient._id,
-      relationship,
-      external: false,
-      idCopyUrl: (g && g.idCopyUrl) || '/uploads/placeholder-id.jpg',
-      photoUrl: (g && g.photoUrl) || '/uploads/placeholder-client.jpg',
-      eligibility: { hasRepaidFafaBefore: !!(g && g.hasRepaidFafaBefore) },
-    });
+    try {
+      return await Guarantor.create({
+        loanId,
+        clientId: guarantorClient._id,
+        relationship,
+        external: false,
+        idCopyUrl: (g && g.idCopyUrl) || '/uploads/placeholder-id.jpg',
+        photoUrl: (g && g.photoUrl) || '/uploads/placeholder-client.jpg',
+        eligibility: { hasRepaidFafaBefore: !!(g && g.hasRepaidFafaBefore) },
+      });
+    } catch (e) {
+      if (e && e.code === 11000) {
+        const existing = await Guarantor.findOne({ loanId, clientId: guarantorClient._id });
+        if (existing) return existing;
+      }
+      throw e;
+    }
   }
 
-  // External guarantor: store provided identifying fields
+  // External guarantor: store provided identifying fields (no clientId)
   try {
     return await Guarantor.create({
       loanId,
@@ -89,13 +109,19 @@ async function createGuarantorEntry(loanId, g, initiatedBy) {
     });
   } catch (e) {
     // Handle duplicate-key races gracefully: return the existing guarantor
-    // if one was inserted concurrently.
     if (e && e.code === 11000) {
+      // Prefer lookup by national id when available
       const byNational = rawNationalId ? await Guarantor.findOne({ loanId, guarantorNationalId: rawNationalId }) : null;
       if (byNational) return byNational;
+      // Fallback to name match
       if (name) {
         const byName = await Guarantor.findOne({ loanId, guarantorName: name });
         if (byName) return byName;
+      }
+      // As a last resort try to find any guarantor for this loan with same phone
+      if (phone) {
+        const byPhone = await Guarantor.findOne({ loanId, guarantorPhone: phone });
+        if (byPhone) return byPhone;
       }
     }
     throw e;
@@ -173,10 +199,7 @@ export const initiateLoan = asyncHandler(async (req, res) => {
           continue;
         }
 
-        if (client.savings_balance_cents < Math.round(principal_cents * 0.2)) {
-          results.skipped.push({ clientId: client._id, reason: 'insufficient savings' });
-          continue;
-        }
+        
 
         const computedCycle = cycle ? Number(cycle) : await computeCycleForClient(client._id, productVal);
 
@@ -267,10 +290,7 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     // group-level initiation branch above (when `groupId` is provided).
   }
 
-  if (client.savings_balance_cents < Math.round(principal_cents * 0.2)) {
-    res.status(400);
-    throw new Error('Client must have at least 20% savings');
-  }
+  
 
   const computedCycle = cycle
     ? Number(cycle)
@@ -360,16 +380,11 @@ export const approveLoan = asyncHandler(async (req, res) => {
     throw new Error('Credit assessment required');
   }
 
-  const acceptedExternal = await Guarantor.countDocuments({
-    loanId: loan._id,
-    accepted: true,
-    external: true,
-    'eligibility.hasRepaidFafaBefore': true,
-  });
-
-  if (acceptedExternal < 1) {
+  // Check that loan has at least 3 guarantors
+  const guarantorCount = await Guarantor.countDocuments({ loanId: loan._id });
+  if (guarantorCount < 3) {
     res.status(400);
-    throw new Error('Eligible external guarantor required');
+    throw new Error('At least 3 guarantors required for loan approval');
   }
 
   loan.approvedBy.push(req.user._id);
@@ -504,6 +519,9 @@ export const getLoanDetail = asyncHandler(async (req, res) => {
   // Guarantors
   const guarantors = await Guarantor.find({ loanId: loan._id }).lean();
 
+  // Credit Assessment
+  const creditAssessment = await CreditAssessment.findOne({ loanId: loan._id }).lean();
+
   // Repayment schedule and history
   const schedules = await RepaymentSchedule.find({ loanId: loan._id }).sort({ installmentNo: 1 }).lean();
   const repayments = await Repayment.find({ loanId: loan._id }).sort({ createdAt: -1 }).lean();
@@ -543,6 +561,8 @@ export const getLoanDetail = asyncHandler(async (req, res) => {
   res.json({
     loan,
     guarantors,
+    creditAssessment,
+    hasCreditAssessment: !!creditAssessment,
     schedules,
     repayments,
     totals: { totalDue, totalPaid, outstanding },

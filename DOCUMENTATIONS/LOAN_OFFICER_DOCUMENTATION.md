@@ -38,6 +38,8 @@ curl -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json
 - Loan officers authenticate as `role: 'loan_officer'` and can perform actions allowed to that role in the system (create clients, create groups where permitted, view assigned clients, record repayments, etc.).
 - The system continues to use the `User` model for authorization checks; the `LoanOfficer` model is a profile with contact metadata.
 
+- Note: When initiating a loan for a single client, the `groupId` field in the loan payload is optional. If the client belongs to a group the system will use the client's `groupId`; providing `groupId` is required only for group-level (bulk) initiation.
+
 **Relevant files:**
 - `models/LoanOfficerModel.js` — profile schema.
 - `controllers/loanOfficerController.js` — creation logic.
