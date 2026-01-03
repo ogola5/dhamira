@@ -143,10 +143,10 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     throw new Error('product, amount (amountCents or amountKES) and term are required');
   }
 
-  // Only loan officers can initiate loans (Maker)
-  if (req.user.role !== 'loan_officer') {
+  // Only loan officers and admins can initiate loans (Maker)
+  if (!mustBeOneOf(req.user.role, ['loan_officer', 'admin'])) {
     res.status(403);
-    throw new Error('Only loan officers can initiate loans');
+    throw new Error('Only loan officers and admins can initiate loans');
   }
 
   const principal_cents = Math.round(Number(amountCentsVal));

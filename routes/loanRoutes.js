@@ -16,24 +16,24 @@ import { protect, restrictTo } from '../middleware/authMiddleware.js';
 const router = express.Router();
 
 /**
- * LOAN HISTORY (SUPER ADMIN ONLY)
+ * LOAN HISTORY (SUPER ADMIN & ADMIN)
  * Complete loan history with statistics
  */
 router.get(
   '/history',
   protect,
-  restrictTo('super_admin'),
+  restrictTo('super_admin', 'admin'),
   getLoanHistory
 );
 
 /**
- * TRACK MY LOANS (LOAN OFFICER)
- * Shows loans for groups assigned to the loan officer
+ * TRACK MY LOANS (LOAN OFFICER & ADMIN)
+ * Shows loans for groups assigned to the loan officer/admin
  */
 router.get(
   '/my-loans',
   protect,
-  restrictTo('loan_officer'),
+  restrictTo('loan_officer', 'admin'),
   trackMyLoans
 );
 
@@ -48,12 +48,12 @@ router.get(
 );
 
 /**
- * INITIATE LOAN (LOAN OFFICER ONLY - MAKER)
+ * INITIATE LOAN (LOAN OFFICER & ADMIN - MAKER)
  */
 router.post(
   '/initiate',
   protect,
-  restrictTo('loan_officer'),
+  restrictTo('loan_officer', 'admin'),
   initiateLoan
 );
 
