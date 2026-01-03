@@ -37,11 +37,22 @@ const userSchema = new Schema(
       type: String,
       enum: [
         'super_admin',
-        'initiator_admin',
-        'approver_admin',
+        'admin',
         'loan_officer',
       ],
       required: true,
+      index: true,
+    },
+
+    /**
+     * Branch assignment (required for loan officers and admins)
+     */
+    branchId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Branch',
+      required: function() {
+        return this.role === 'loan_officer' || this.role === 'admin';
+      },
       index: true,
     },
 

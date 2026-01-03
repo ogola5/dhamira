@@ -17,9 +17,16 @@ const createSavings = asyncHandler(async (req, res) => {
     throw new Error('Client not found');
   }
 
-  if (!['approver_admin', 'super_admin'].includes(req.user.role)) {
+  // Authorization: admins can manage any client, loan officers only their own
+  if (!['approver_admin', 'super_admin', 'loan_officer'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Not allowed');
+  }
+
+  // Loan officers can only manage savings for their assigned clients
+  if (req.user.role === 'loan_officer' && String(client.loanOfficer) !== String(req.user._id)) {
+    res.status(403);
+    throw new Error('Access denied: not your client');
   }
 
   const cents = typeof amountCents !== 'undefined'
@@ -67,8 +74,8 @@ const createSavings = asyncHandler(async (req, res) => {
 });
 
 const listSavings = asyncHandler(async (req, res) => {
-  // Only admins allowed
-  if (!['approver_admin', 'super_admin'].includes(req.user.role)) {
+  // Authorization: admins see all, loan officers see only their clients
+  if (!['approver_admin', 'super_admin', 'loan_officer'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Not allowed');
   }
@@ -78,6 +85,13 @@ const listSavings = asyncHandler(async (req, res) => {
   const skip = (page - 1) * limit;
 
   const q = { 'rawCallback.source': 'savings' };
+
+  // If loan officer, only show savings for their assigned clients
+  if (req.user.role === 'loan_officer') {
+    const assignedClients = await Client.find({ loanOfficer: req.user._id }).select('_id');
+    const clientIds = assignedClients.map(c => String(c._id));
+    q['rawCallback.clientId'] = { $in: clientIds };
+  }
 
   const [total, txs] = await Promise.all([
     Transaction.countDocuments(q),

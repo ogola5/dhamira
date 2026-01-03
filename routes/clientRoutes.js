@@ -25,7 +25,7 @@ const router = express.Router();
 router.get(
   '/search',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   searchClients
 );
 
@@ -37,30 +37,30 @@ router.get(
 router.get(
   '/',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   getClients
 );
 
 /**
  * ============================
- * CREATE CLIENT
+ * CREATE CLIENT (LOAN OFFICER ONLY - MAKER)
  * ============================
  */
 router.post(
   '/',
   protect,
-  restrictTo('loan_officer', 'super_admin'),
+  restrictTo('loan_officer'),
   upload.single('photo'),
   onboardClient
 );
 
 /**
- * ADD SAVINGS (admin action)
+ * ADD SAVINGS (admin action only)
  */
 router.post(
   '/:id/savings',
   protect,
-  restrictTo('initiator_admin', 'super_admin'),
+  restrictTo('admin'),
   addSavings
 );
 
@@ -70,7 +70,7 @@ router.post(
 router.get(
   '/:id/history',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   getClientHistory
 );
 
@@ -82,7 +82,7 @@ router.get(
 router.get(
   '/:id',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   getClientById
 );
 
@@ -94,19 +94,19 @@ router.get(
 router.put(
   '/:id',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   updateClient
 );
 
 /**
  * ============================
- * APPROVE CLIENT
+ * APPROVE CLIENT (ADMIN ONLY - CHECKER)
  * ============================
  */
 router.put(
   '/:id/approve',
   protect,
-  restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
+  restrictTo('admin'),
   approveClient
 );
 
@@ -118,7 +118,7 @@ router.put(
 router.put(
   '/:id/deactivate',
   protect,
-  restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
+  restrictTo('admin', 'super_admin'),
   deactivateClient
 );
 

@@ -91,6 +91,7 @@ const clientSchema = new Schema(
     residenceType: {
       type: String,
       enum: ['owned', 'rented'],
+      lowercase: true,  // Automatically convert to lowercase
       default: null,
     },
 

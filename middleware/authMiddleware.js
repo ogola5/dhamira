@@ -5,17 +5,18 @@ import asyncHandler from 'express-async-handler';
 
 /**
  * Role groups (single source of truth)
+ * Maker-Checker Model:
+ * - Loan Officer (Maker): Initiates groups, clients, loans
+ * - Admin (Checker): Approves groups, clients, loans, disbursements
+ * - Super Admin (System): User/branch management only
  */
 export const ROLE_GROUPS = {
   SUPER_ADMIN: ['super_admin'],
-  ADMINS: ['super_admin', 'initiator_admin', 'approver_admin'],
+  ADMINS: ['admin'],
   LOAN_OFFICERS: ['loan_officer'],
-  ALL_INTERNAL: [
-    'super_admin',
-    'initiator_admin',
-    'approver_admin',
-    'loan_officer',
-  ],
+  MAKERS: ['loan_officer'],
+  CHECKERS: ['admin'],
+  ALL_INTERNAL: ['super_admin', 'admin', 'loan_officer'],
 };
 
 // Protect routes (attach user context)
@@ -110,4 +111,27 @@ const restrictTo = (...roles) => {
   };
 };
 
-export { protect, restrictTo };
+// Enforce branch-level data isolation for loan officers
+const enforceBranchAccess = async (req, res, next) => {
+  if (!req.user) {
+    res.status(401);
+    throw new Error('Not authorized');
+  }
+
+  // Super admins can access all branches
+  if (req.user.role === 'super_admin') {
+    return next();
+  }
+
+  // Loan officers and admins must have branchId
+  if (!req.user.branchId) {
+    res.status(403);
+    throw new Error('User not assigned to any branch');
+  }
+
+  // Attach branchId to request for filtering
+  req.userBranchId = req.user.branchId;
+  next();
+};
+
+export { protect, restrictTo, enforceBranchAccess };

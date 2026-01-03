@@ -15,6 +15,7 @@ startCrons();
 // Route Imports
 // -------------------------
 import authRoutes from './routes/authRoutes.js';
+import branchRoutes from './routes/branchRoutes.js';
 import groupRoutes from './routes/groupRoutes.js';
 import clientRoutes from './routes/clientRoutes.js';
 import loanRoutes from './routes/loanRoutes.js';
@@ -75,6 +76,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // API Routes
 // -------------------------
 app.use('/api/auth', authRoutes);
+app.use('/api/branches', branchRoutes);
 app.use('/api/groups', groupRoutes);
 app.use('/api/clients', clientRoutes);
 app.use('/api/loans', loanRoutes);

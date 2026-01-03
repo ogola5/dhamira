@@ -22,6 +22,12 @@ export const disburseLoan = asyncHandler(async (req, res) => {
     throw new Error('Loan not found');
   }
 
+  // Only admins can disburse loans (Checker)
+  if (req.user.role !== 'admin') {
+    res.status(403);
+    throw new Error('Only admins can disburse loans');
+  }
+
   if (loan.status !== 'approved') {
     res.status(400);
     throw new Error('Loan must be approved before disbursement');

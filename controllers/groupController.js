@@ -13,16 +13,31 @@ import Client from '../models/ClientModel.js';
  * Status: pending
  */
 export const createGroup = asyncHandler(async (req, res) => {
-  const { name, meetingDay, meetingTime } = req.body;
+  const { name, meetingDay, meetingTime, branchId } = req.body;
 
   if (!name) {
     res.status(400);
     throw new Error('Group name is required');
   }
 
-  if (!['loan_officer', 'super_admin'].includes(req.user.role)) {
+  // Only loan officers can create groups (Maker)
+  if (req.user.role !== 'loan_officer') {
     res.status(403);
-    throw new Error('Only loan officers or super admin can create groups');
+    throw new Error('Only loan officers can create groups');
+  }
+
+  // Use provided branchId or default to user's branch
+  const finalBranchId = branchId || req.user.branchId;
+  
+  if (!finalBranchId) {
+    res.status(400);
+    throw new Error('Branch ID is required');
+  }
+
+  // Loan officers can only create groups in their branch
+  if (req.user.role === 'loan_officer' && String(finalBranchId) !== String(req.user.branchId)) {
+    res.status(403);
+    throw new Error('You can only create groups in your assigned branch');
   }
 
   const exists = await Group.findOne({ name: name.trim() });
@@ -33,7 +48,7 @@ export const createGroup = asyncHandler(async (req, res) => {
 
   const group = await Group.create({
     name: name.trim(),
-    branchId: req.user.branchId,
+    branchId: finalBranchId,
     loanOfficer: req.user._id,
     createdBy: req.user._id,
     meetingDay: meetingDay || null,
@@ -61,9 +76,10 @@ export const approveGroup = asyncHandler(async (req, res) => {
     throw new Error('Group not found');
   }
 
-  if (!['initiator_admin', 'approver_admin', 'super_admin'].includes(req.user.role)) {
+  // Only admins can approve (Checker)
+  if (req.user.role !== 'admin') {
     res.status(403);
-    throw new Error('Not allowed');
+    throw new Error('Only admins can approve groups');
   }
 
   if (group.status !== 'pending') {
@@ -144,6 +160,14 @@ export const assignSignatories = asyncHandler(async (req, res) => {
   }
 
   group.signatories = finalSignatories;
+  
+  // Sync individual signatory fields
+  finalSignatories.forEach(sig => {
+    if (sig.role === 'chairperson') group.chairperson = sig.clientId;
+    if (sig.role === 'secretary') group.secretary = sig.clientId;
+    if (sig.role === 'treasurer') group.treasurer = sig.clientId;
+  });
+  
   await group.save();
 
   res.json({ message: 'Signatories assigned', group });
@@ -161,28 +185,137 @@ export const updateGroup = asyncHandler(async (req, res) => {
     throw new Error('Group not found');
   }
 
+  // Loan officer can only edit their own groups (skip check if loanOfficer is null - legacy groups)
   if (
     req.user.role === 'loan_officer' &&
+    group.loanOfficer &&
     String(group.loanOfficer) !== String(req.user._id)
   ) {
     res.status(403);
     throw new Error('Not allowed');
   }
 
-  // HARD RULE: structural fields locked after loans
+  const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
   const hasLoans = await Loan.countDocuments({ groupId: group._id });
-  if (hasLoans > 0) {
-    const forbidden = ['members', 'loanOfficer', 'branchId'];
-    forbidden.forEach(f => {
-      if (req.body[f] !== undefined) {
-        throw new Error(`Cannot modify ${f} after loans exist`);
+
+  // Admins have more editing power
+  if (isAdmin) {
+    // Admin can update these fields
+    const adminAllowed = [
+      'name',
+      'meetingDay',
+      'meetingTime',
+      'loanOfficer',  // Admin can reassign loan officer
+      'branchId',     // Admin can reassign branch
+      'status',       // Admin can change status
+    ];
+
+    adminAllowed.forEach(field => {
+      if (req.body[field] !== undefined) {
+        group[field] = req.body[field];
       }
     });
+
+    // Admin can update members if provided
+    if (req.body.members !== undefined && Array.isArray(req.body.members)) {
+      group.members = req.body.members;
+    }
+
+    // Handle signatories in array format
+    if (req.body.signatories !== undefined && Array.isArray(req.body.signatories)) {
+      // Validate signatories structure
+      if (req.body.signatories.length === 3) {
+        const roles = req.body.signatories.map(s => s.role);
+        const uniqueRoles = new Set(roles);
+        
+        if (uniqueRoles.size !== 3) {
+          res.status(400);
+          throw new Error('Signatories must have 3 different roles: chairperson, secretary, treasurer');
+        }
+
+        const clientIds = req.body.signatories.map(s => String(s.clientId));
+        if (new Set(clientIds).size !== clientIds.length) {
+          res.status(400);
+          throw new Error('One client cannot hold multiple signatory roles');
+        }
+
+        group.signatories = req.body.signatories;
+        
+        // Sync individual fields with signatories array
+        req.body.signatories.forEach(sig => {
+          if (sig.role === 'chairperson') group.chairperson = sig.clientId;
+          if (sig.role === 'secretary') group.secretary = sig.clientId;
+          if (sig.role === 'treasurer') group.treasurer = sig.clientId;
+        });
+      } else if (req.body.signatories.length > 0) {
+        res.status(400);
+        throw new Error('Group must have exactly 3 signatories');
+      }
+    }
+
+    // Handle signatories in flat format (chairperson, secretary, treasurer)
+    if (req.body.chairperson || req.body.secretary || req.body.treasurer) {
+      const { chairperson, secretary, treasurer } = req.body;
+      
+      // Check if all three are provided
+      if (chairperson && secretary && treasurer) {
+        // Validate all are different
+        const ids = [String(chairperson), String(secretary), String(treasurer)];
+        if (new Set(ids).size !== 3) {
+          res.status(400);
+          throw new Error('Chairperson, secretary, and treasurer must be different clients');
+        }
+
+        // Build signatories array
+        group.signatories = [
+          { role: 'chairperson', clientId: chairperson },
+          { role: 'secretary', clientId: secretary },
+          { role: 'treasurer', clientId: treasurer }
+        ];
+        
+        // Sync individual fields
+        group.chairperson = chairperson;
+        group.secretary = secretary;
+        group.treasurer = treasurer;
+      } else if (chairperson || secretary || treasurer) {
+        // If only some are provided, return error
+        res.status(400);
+        throw new Error('Must provide all three signatories: chairperson, secretary, and treasurer');
+      }
+    }
+  } else {
+    // Loan officer restrictions: lock structural fields after loans
+    if (hasLoans > 0) {
+      const forbidden = ['members', 'loanOfficer', 'branchId'];
+      forbidden.forEach(f => {
+        if (req.body[f] !== undefined) {
+          res.status(400);
+          throw new Error(`Cannot modify ${f} after loans exist`);
+        }
+      });
+    }
+
+    // Loan officers can only update safe fields
+    if (req.body.name !== undefined) group.name = req.body.name;
+    if (req.body.meetingDay !== undefined) group.meetingDay = req.body.meetingDay;
+    if (req.body.meetingTime !== undefined) group.meetingTime = req.body.meetingTime;
   }
 
-  // Only safe fields
-  if (req.body.meetingDay !== undefined) group.meetingDay = req.body.meetingDay;
-  if (req.body.meetingTime !== undefined) group.meetingTime = req.body.meetingTime;
+  // Auto-activate legacy groups when all required fields are filled
+  if (group.status === 'legacy') {
+    const hasAllRequiredFields = 
+      group.name &&
+      group.loanOfficer &&
+      group.branchId &&
+      group.meetingDay &&
+      group.meetingTime &&
+      group.signatories &&
+      group.signatories.length === 3;
+
+    if (hasAllRequiredFields) {
+      group.status = 'active';
+    }
+  }
 
   await group.save();
   res.json({ message: 'Group updated', group });
@@ -200,7 +333,7 @@ export const deactivateGroup = asyncHandler(async (req, res) => {
     throw new Error('Group not found');
   }
 
-  if (!['initiator_admin', 'approver_admin', 'super_admin'].includes(req.user.role)) {
+  if (!['admin', 'super_admin'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Not allowed');
   }
@@ -228,7 +361,13 @@ export const deactivateGroup = asyncHandler(async (req, res) => {
  */
 export const getGroups = asyncHandler(async (req, res) => {
   const filter = {};
-  if (req.user.role === 'loan_officer') filter.loanOfficer = req.user._id;
+  if (req.user.role === 'loan_officer') {
+    // Show loan officer's own groups + legacy groups with no loan officer
+    filter.$or = [
+      { loanOfficer: req.user._id },
+      { loanOfficer: null, status: 'legacy' }
+    ];
+  }
 
   const page = Number(req.query.page) || 1;
   const limit = Math.min(Number(req.query.limit) || 20, 1000);
@@ -239,6 +378,10 @@ export const getGroups = asyncHandler(async (req, res) => {
     Group.find(filter)
       .populate('loanOfficer', 'username')
       .populate('members', 'name nationalId')
+      .populate('signatories.clientId', 'name nationalId')
+      .populate('chairperson', 'name nationalId')
+      .populate('secretary', 'name nationalId')
+      .populate('treasurer', 'name nationalId')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit),
@@ -260,7 +403,11 @@ export const getGroupById = asyncHandler(async (req, res) => {
 
   const group = await Group.findById(req.params.id)
     .populate('loanOfficer', 'username')
-    .populate('members', 'name nationalId');
+    .populate('members', 'name nationalId')
+    .populate('signatories.clientId', 'name nationalId')
+    .populate('chairperson', 'name nationalId')
+    .populate('secretary', 'name nationalId')
+    .populate('treasurer', 'name nationalId');
 
   if (!group) {
     res.status(404);

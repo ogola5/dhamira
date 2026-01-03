@@ -90,7 +90,7 @@ const submitQuickAssessment = asyncHandler(async (req, res) => {
   }
 
   // only allow admins to quick-create assessments
-  if (!['approver_admin', 'super_admin', 'initiator_admin'].includes(req.user.role)) {
+  if (!['admin', 'super_admin'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Access denied');
   }

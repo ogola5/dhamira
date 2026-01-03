@@ -23,12 +23,12 @@ router.get(
 );
 
 /**
- * CREATE GROUP
+ * CREATE GROUP (LOAN OFFICER ONLY - MAKER)
  */
 router.post(
   '/',
-    protect,
-    restrictTo('loan_officer', 'super_admin'),
+  protect,
+  restrictTo('loan_officer'),
   createGroup
 );
 
@@ -47,27 +47,27 @@ router.get(
 router.put(
   '/:id',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   updateGroup
 );
 
 /**
- * APPROVE GROUP
+ * APPROVE GROUP (ADMIN ONLY - CHECKER)
  */
 router.put(
   '/:id/approve',
   protect,
-  restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
+  restrictTo('admin'),
   approveGroup
 );
 
 /**
- * ASSIGN SIGNATORIES (ONCE)
+ * ASSIGN SIGNATORIES (3 required)
  */
 router.put(
   '/:id/signatories',
   protect,
-  restrictTo('loan_officer', 'super_admin'),
+  restrictTo('loan_officer', 'admin'),
   assignSignatories
 );
 
@@ -75,7 +75,7 @@ router.put(
 router.put(
   '/:id/assign-signatories',
   protect,
-  restrictTo('loan_officer', 'super_admin'),
+  restrictTo('loan_officer', 'admin'),
   assignSignatories
 );
 
@@ -85,7 +85,7 @@ router.put(
 router.put(
   '/:id/deactivate',
   protect,
-  restrictTo('initiator_admin', 'approver_admin', 'super_admin'),
+  restrictTo('admin', 'super_admin'),
   deactivateGroup
 );
 

@@ -7,7 +7,7 @@ const router = express.Router();
 router.post(
   '/',
   protect,
-  restrictTo('loan_officer', 'initiator_admin', 'super_admin'),
+  restrictTo('loan_officer', 'admin', 'super_admin'),
   addGuarantor
 );
 
@@ -20,7 +20,7 @@ router.get(
 router.put(
   '/:id/accept',
   protect,
-  restrictTo('loan_officer', 'approver_admin', 'super_admin'),
+  restrictTo('loan_officer', 'admin', 'super_admin'),
   acceptGuarantor
 );
 

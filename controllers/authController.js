@@ -1,5 +1,6 @@
 // controllers/authController.js
 import userModel from '../models/userModel.js';
+import Branch from '../models/BranchModel.js';
 import jwt from 'jsonwebtoken';
 import asyncHandler from 'express-async-handler';
 
@@ -63,17 +64,31 @@ const login = asyncHandler(async (req, res) => {
 
 // POST /api/auth/register (super_admin only)
 const register = asyncHandler(async (req, res) => {
-  const { username, password, nationalId, phone, role, regions } = req.body;
+  const { username, password, nationalId, phone, role, regions, branchId } = req.body;
 
   const allowedRoles = [
-    'initiator_admin',
-    'approver_admin',
+    'admin',
     'loan_officer',
   ];
 
   if (!allowedRoles.includes(role)) {
     res.status(400);
-    throw new Error('Invalid role assignment');
+    throw new Error('Invalid role assignment. Allowed roles: admin, loan_officer');
+  }
+
+  // Validate branchId is required for admin and loan_officer
+  if ((role === 'admin' || role === 'loan_officer') && !branchId) {
+    res.status(400);
+    throw new Error('Branch ID is required for admin and loan_officer roles');
+  }
+
+  // Verify branch exists
+  if (branchId) {
+    const branch = await Branch.findById(branchId);
+    if (!branch) {
+      res.status(404);
+      throw new Error('Branch not found');
+    }
   }
 
   const exists = await userModel.findOne({
@@ -91,6 +106,7 @@ const register = asyncHandler(async (req, res) => {
     nationalId: nationalId.trim(),
     phone: phone.trim(),
     role,
+    branchId: branchId || null,
     regions: Array.isArray(regions) ? regions : [],
   });
 
@@ -98,6 +114,7 @@ const register = asyncHandler(async (req, res) => {
     _id: user._id,
     username: user.username,
     role: user.role,
+    branchId: user.branchId,
   });
 });
 
@@ -142,4 +159,121 @@ const changePassword = asyncHandler(async (req, res) => {
   res.json({ message: 'Password updated', token });
 });
 
-export { login, register, changePassword };
+/**
+ * ============================
+ * CREATE BRANCH (SUPER ADMIN ONLY)
+ * ============================
+ */
+const createBranch = asyncHandler(async (req, res) => {
+  const { code, name } = req.body;
+
+  if (!code || !name) {
+    res.status(400);
+    throw new Error('Branch code and name are required');
+  }
+
+  const exists = await Branch.findOne({
+    $or: [{ code: code.trim() }, { name: name.trim() }]
+  });
+
+  if (exists) {
+    res.status(409);
+    throw new Error('Branch with this code or name already exists');
+  }
+
+  const branch = await Branch.create({
+    code: code.trim(),
+    name: name.trim()
+  });
+
+  res.status(201).json({
+    message: 'Branch created successfully',
+    branch
+  });
+});
+
+/**
+ * ============================
+ * GET ALL BRANCHES
+ * ============================
+ */
+const getBranches = asyncHandler(async (req, res) => {
+  const branches = await Branch.find().sort({ name: 1 });
+  res.json({ branches });
+});
+
+/**
+ * ============================
+ * ASSIGN/REASSIGN LOAN OFFICER TO GROUP
+ * ============================
+ */
+const assignLoanOfficer = asyncHandler(async (req, res) => {
+  const { entityType, entityId, loanOfficerId } = req.body;
+
+  if (!entityType || !entityId || !loanOfficerId) {
+    res.status(400);
+    throw new Error('entityType, entityId, and loanOfficerId are required');
+  }
+
+  // Verify loan officer exists and has correct role
+  const officer = await userModel.findById(loanOfficerId);
+  if (!officer || officer.role !== 'loan_officer') {
+    res.status(404);
+    throw new Error('Loan officer not found');
+  }
+
+  let updated;
+  if (entityType === 'group') {
+    const Group = (await import('../models/GroupModel.js')).default;
+    updated = await Group.findByIdAndUpdate(
+      entityId,
+      { $set: { loanOfficer: loanOfficerId } },
+      { new: true }
+    );
+  } else if (entityType === 'client') {
+    const Client = (await import('../models/ClientModel.js')).default;
+    updated = await Client.findByIdAndUpdate(
+      entityId,
+      { $set: { loanOfficer: loanOfficerId } },
+      { new: true }
+    );
+  } else {
+    res.status(400);
+    throw new Error('Invalid entityType. Must be "group" or "client"');
+  }
+
+  if (!updated) {
+    res.status(404);
+    throw new Error(`${entityType} not found`);
+  }
+
+  res.json({
+    message: `Loan officer assigned to ${entityType}`,
+    entity: updated
+  });
+});
+
+/**
+ * ============================
+ * GET ALL USERS (SUPER ADMIN)
+ * ============================
+ */
+const getUsers = asyncHandler(async (req, res) => {
+  const users = await userModel
+    .find()
+    .select('-password')
+    .populate('branchId', 'name code')
+    .sort({ createdAt: -1 });
+
+  res.json({ users });
+});
+
+export { 
+  login, 
+  register, 
+  changePassword, 
+  createBranch, 
+  getBranches, 
+  assignLoanOfficer,
+  getUsers 
+};

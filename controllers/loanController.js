@@ -143,9 +143,10 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     throw new Error('product, amount (amountCents or amountKES) and term are required');
   }
 
-  if (!mustBeOneOf(req.user.role, ['initiator_admin', 'super_admin'])) {
+  // Only loan officers can initiate loans (Maker)
+  if (req.user.role !== 'loan_officer') {
     res.status(403);
-    throw new Error('Access denied');
+    throw new Error('Only loan officers can initiate loans');
   }
 
   const principal_cents = Math.round(Number(amountCentsVal));
@@ -351,9 +352,10 @@ export const approveLoan = asyncHandler(async (req, res) => {
     throw new Error('Loan not found');
   }
 
-  if (!mustBeOneOf(req.user.role, ['approver_admin', 'super_admin'])) {
+  // Only admins can approve loans (Checker)
+  if (req.user.role !== 'admin') {
     res.status(403);
-    throw new Error('Access denied');
+    throw new Error('Only admins can approve loans');
   }
 
   if (loan.status !== 'initiated') {
@@ -361,10 +363,8 @@ export const approveLoan = asyncHandler(async (req, res) => {
     throw new Error('Loan must be in initiated state');
   }
 
-  if (
-    String(loan.initiatedBy) === String(req.user._id) &&
-    req.user.role !== 'super_admin'
-  ) {
+  // Maker-Checker: Admin cannot approve loan they initiated
+  if (String(loan.initiatedBy) === String(req.user._id)) {
     res.status(403);
     throw new Error('Cannot approve your own initiated loan');
   }
@@ -403,7 +403,7 @@ export const markApplicationFeePaid = asyncHandler(async (req, res) => {
     throw new Error('Loan not found');
   }
 
-  if (!mustBeOneOf(req.user.role, ['initiator_admin', 'approver_admin', 'super_admin'])) {
+  if (!mustBeOneOf(req.user.role, ['admin', 'super_admin'])) {
     res.status(403);
     throw new Error('Access denied');
   }
@@ -422,7 +422,7 @@ export const markApplicationFeePaidBulk = asyncHandler(async (req, res) => {
     throw new Error('loanIds array required');
   }
 
-  if (!mustBeOneOf(req.user.role, ['initiator_admin', 'approver_admin', 'super_admin'])) {
+  if (!mustBeOneOf(req.user.role, ['admin', 'super_admin'])) {
     res.status(403);
     throw new Error('Access denied');
   }
@@ -446,7 +446,7 @@ export const cancelLoan = asyncHandler(async (req, res) => {
     throw new Error('Loan not found');
   }
 
-  if (!mustBeOneOf(req.user.role, ['initiator_admin', 'super_admin'])) {
+  if (!mustBeOneOf(req.user.role, ['admin', 'super_admin'])) {
     res.status(403);
     throw new Error('Access denied');
   }
@@ -737,17 +737,17 @@ export const getLoanDetail = asyncHandler(async (req, res) => {
   const actions = [];
 
   if (status === 'initiated') {
-    if (['approver_admin', 'super_admin'].includes(role)) actions.push({ key: 'approve', label: 'Approve' });
-    if (['initiator_admin', 'super_admin'].includes(role)) actions.push({ key: 'cancel', label: 'Cancel' });
+    if (['admin', 'super_admin'].includes(role)) actions.push({ key: 'approve', label: 'Approve' });
+    if (['admin', 'super_admin'].includes(role)) actions.push({ key: 'cancel', label: 'Cancel' });
   }
   if (status === 'approved') {
-    if (['approver_admin', 'super_admin'].includes(role)) actions.push({ key: 'disburse', label: 'Disburse' });
+    if (['admin', 'super_admin'].includes(role)) actions.push({ key: 'disburse', label: 'Disburse' });
   }
   if (status === 'disbursed') {
-    if (['loan_officer', 'approver_admin', 'initiator_admin', 'super_admin'].includes(role)) actions.push({ key: 'record_repayment', label: 'Record Repayment' });
+    if (['loan_officer', 'admin', 'super_admin'].includes(role)) actions.push({ key: 'record_repayment', label: 'Record Repayment' });
   }
   if (['initiated', 'approved', 'disbursement_pending'].includes(status)) {
-    if (['initiator_admin', 'super_admin'].includes(role)) actions.push({ key: 'edit', label: 'Edit Application' });
+    if (['admin', 'super_admin'].includes(role)) actions.push({ key: 'edit', label: 'Edit Application' });
   }
 
   res.json({

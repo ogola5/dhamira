@@ -22,27 +22,44 @@ export const onboardClient = asyncHandler(async (req, res) => {
     businessLocation,
     nextOfKin,
     groupId,
+    branchId,
   } = req.body;
 
-  if (!name || !nationalId || !phone || !businessType || !businessLocation || !groupId) {
+  // Validate required fields including branchId and groupId
+  if (!name || !nationalId || !phone || !businessType || !businessLocation || !groupId || !branchId) {
     res.status(400);
-    throw new Error('Missing required fields');
+    throw new Error('Missing required fields: name, nationalId, phone, businessType, businessLocation, groupId, and branchId are mandatory');
   }
 
+  // Only loan officers can onboard clients (Maker)
   if (req.user.role !== 'loan_officer') {
     res.status(403);
     throw new Error('Only loan officers can onboard clients');
   }
 
+  // Verify group exists and belongs to loan officer's branch
   const group = await Group.findById(groupId);
-      if (!['loan_officer', 'super_admin'].includes(req.user.role)) {
-        res.status(403);
-        throw new Error('Only loan officers or super admin can onboard clients');
-      }
+  if (!group) {
+    res.status(404);
+    throw new Error('Group not found');
+  }
 
+  // Ensure group belongs to the loan officer
   if (String(group.loanOfficer) !== String(req.user._id)) {
     res.status(403);
-    throw new Error('Not your group');
+    throw new Error('You can only add clients to your own groups');
+  }
+
+  // Ensure branch matches group's branch
+  if (String(group.branchId) !== String(branchId)) {
+    res.status(400);
+    throw new Error('Branch ID must match the group\'s branch');
+  }
+
+  // Prevent orphaned clients - verify branchId matches user's branch
+  if (req.user.branchId && String(branchId) !== String(req.user.branchId)) {
+    res.status(403);
+    throw new Error('You can only create clients in your assigned branch');
   }
 
   const exists = await Client.findOne({ nationalId: nationalId.trim() });
@@ -56,7 +73,7 @@ export const onboardClient = asyncHandler(async (req, res) => {
     nationalId: nationalId.trim(),
     phone: phone.trim(),
     groupId,
-    branchId: group.branchId,
+    branchId,
     loanOfficer: req.user._id,
     createdBy: req.user._id,
     businessType: businessType.trim(),
@@ -99,9 +116,10 @@ export const onboardClient = asyncHandler(async (req, res) => {
         throw new Error('Client not found');
       }
 
-      if (!['initiator_admin', 'super_admin'].includes(req.user.role)) {
+      // Only admins can add savings
+      if (req.user.role !== 'admin') {
         res.status(403);
-        throw new Error('Not allowed to add savings');
+        throw new Error('Only admins can add savings');
       }
 
       const cents = typeof amountCents !== 'undefined'
@@ -127,9 +145,10 @@ export const approveClient = asyncHandler(async (req, res) => {
     throw new Error('Client not found');
   }
 
-  if (!['initiator_admin', 'approver_admin', 'super_admin'].includes(req.user.role)) {
+  // Only admins can approve clients (Checker)
+  if (req.user.role !== 'admin') {
     res.status(403);
-    throw new Error('Not allowed to approve clients');
+    throw new Error('Only admins can approve clients');
   }
 
   if (client.status !== 'pending') {
@@ -157,7 +176,11 @@ export const getClients = asyncHandler(async (req, res) => {
   const filter = {};
 
   if (req.user.role === 'loan_officer') {
-    filter.loanOfficer = req.user._id;
+    // Show loan officer's own clients + legacy clients with no loan officer
+    filter.$or = [
+      { loanOfficer: req.user._id },
+      { loanOfficer: null, status: 'legacy' }
+    ];
   }
 
   const page = Number(req.query.page) || 1;
@@ -167,7 +190,11 @@ export const getClients = asyncHandler(async (req, res) => {
   const [total, clients] = await Promise.all([
     Client.countDocuments(filter),
     Client.find(filter)
-      .populate('groupId', 'name')
+      .populate('groupId', 'name status')
+      .populate('loanOfficer', 'username role')
+      .populate('branchId', 'name')
+      .populate('createdBy', 'username role')
+      .populate('approvedBy', 'username role')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -204,8 +231,8 @@ export const getClientHistory = asyncHandler(async (req, res) => {
     throw new Error('Client not found');
   }
 
-  // Authorization: loan officers may only view their own clients
-  if (req.user.role === 'loan_officer' && String(client.loanOfficer) !== String(req.user._id)) {
+  // Authorization: loan officers may only view their own clients or legacy clients
+  if (req.user.role === 'loan_officer' && client.loanOfficer && String(client.loanOfficer) !== String(req.user._id)) {
     res.status(403);
     throw new Error('Access denied');
   }
@@ -249,16 +276,21 @@ export const getClientById = asyncHandler(async (req, res) => {
   }
 
   const client = await Client.findById(req.params.id)
-    .populate('groupId', 'name')
-    .populate('loanOfficer', 'username role');
+    .populate('groupId', 'name status meetingDay meetingTime')
+    .populate('loanOfficer', 'username role email')
+    .populate('branchId', 'name location')
+    .populate('createdBy', 'username role')
+    .populate('approvedBy', 'username role');
 
   if (!client) {
     res.status(404);
     throw new Error('Client not found');
   }
 
+  // Loan officer can only view their own clients or legacy clients with no loan officer
   if (
     req.user.role === 'loan_officer' &&
+    client.loanOfficer &&
     String(client.loanOfficer._id) !== String(req.user._id)
   ) {
     res.status(403);
@@ -280,41 +312,110 @@ export const updateClient = asyncHandler(async (req, res) => {
     throw new Error('Client not found');
   }
 
+  // Loan officer can only edit their own clients or legacy clients with no loan officer
   if (
     req.user.role === 'loan_officer' &&
+    client.loanOfficer &&
     String(client.loanOfficer) !== String(req.user._id)
   ) {
     res.status(403);
     throw new Error('Not allowed');
   }
 
-  // HARD RULE: If client has loan history, lock structural fields
+  const isAdmin = ['admin', 'super_admin'].includes(req.user.role);
   const hasLoans = await Loan.countDocuments({ clientId: client._id });
-  if (hasLoans > 0) {
-    const forbidden = ['groupId', 'loanOfficer', 'branchId', 'nationalId'];
-    forbidden.forEach(f => {
-      if (req.body[f] !== undefined) {
-        throw new Error(`Cannot modify ${f} after loan history exists`);
+
+  // Admins have more editing power
+  if (isAdmin) {
+    // Admin can edit most fields, but nationalId is always locked if loans exist
+    if (hasLoans > 0 && req.body.nationalId !== undefined) {
+      res.status(400);
+      throw new Error('Cannot modify nationalId after loan history exists');
+    }
+
+    // Allow admin to update these fields
+    const adminAllowed = [
+      'name',
+      'phone',
+      'businessType',
+      'businessLocation',
+      'nextOfKin',
+      'residenceType',
+      'groupId',      // Admin can reassign group
+      'loanOfficer',  // Admin can reassign loan officer
+      'branchId',     // Admin can reassign branch
+    ];
+
+    // Only update nationalId if no loans exist
+    if (!hasLoans && req.body.nationalId !== undefined) {
+      adminAllowed.push('nationalId');
+    }
+
+    adminAllowed.forEach(field => {
+      if (req.body[field] !== undefined) {
+        client[field] = req.body[field];
+      }
+    });
+  } else {
+    // Loan officer restrictions: lock structural fields if loans exist
+    if (hasLoans > 0) {
+      const forbidden = ['groupId', 'loanOfficer', 'branchId', 'nationalId'];
+      forbidden.forEach(f => {
+        if (req.body[f] !== undefined) {
+          res.status(400);
+          throw new Error(`Cannot modify ${f} after loan history exists`);
+        }
+      });
+    }
+
+    const allowed = [
+      'name',
+      'phone',
+      'businessType',
+      'businessLocation',
+      'nextOfKin',
+      'residenceType',
+    ];
+
+    allowed.forEach(field => {
+      if (req.body[field] !== undefined) {
+        client[field] = req.body[field];
       }
     });
   }
 
-  const allowed = [
-    'name',
-    'phone',
-    'businessType',
-    'businessLocation',
-    'nextOfKin',
-    'residenceType',
-  ];
+  // Auto-activate legacy clients when all required fields are filled
+  if (client.status === 'legacy') {
+    const hasAllRequiredFields = 
+      client.name &&
+      client.nationalId &&
+      client.phone &&
+      client.businessType &&
+      client.businessLocation &&
+      client.residenceType &&
+      client.nextOfKin?.name &&
+      client.nextOfKin?.phone &&
+      client.nextOfKin?.relationship;
 
-  allowed.forEach(field => {
-    if (req.body[field] !== undefined) {
-      client[field] = req.body[field];
+    if (hasAllRequiredFields) {
+      client.status = 'active';
+      if (!client.registrationDate) {
+        client.registrationDate = new Date();
+      }
     }
-  });
+  }
 
   await client.save();
+  
+  // Populate fields for response
+  await client.populate([
+    { path: 'groupId', select: 'name status' },
+    { path: 'loanOfficer', select: 'username role' },
+    { path: 'branchId', select: 'name' },
+    { path: 'createdBy', select: 'username role' },
+    { path: 'approvedBy', select: 'username role' }
+  ]);
+  
   res.json({ message: 'Client updated', client });
 });
 
@@ -330,7 +431,7 @@ export const deactivateClient = asyncHandler(async (req, res) => {
     throw new Error('Client not found');
   }
 
-  if (!['initiator_admin', 'approver_admin', 'super_admin'].includes(req.user.role)) {
+  if (!['admin', 'super_admin'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Not allowed');
   }

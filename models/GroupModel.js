@@ -60,7 +60,6 @@ const groupSchema = new Schema(
 
     meetingTime: {
       type: String,
-      enum: allowedTimes,
       default: null,
     },
 
@@ -82,6 +81,25 @@ const groupSchema = new Schema(
         },
       },
     ],
+
+    // Individual signatory references for easier querying
+    chairperson: {
+      type: Schema.Types.ObjectId,
+      ref: 'Client',
+      default: null,
+    },
+
+    secretary: {
+      type: Schema.Types.ObjectId,
+      ref: 'Client',
+      default: null,
+    },
+
+    treasurer: {
+      type: Schema.Types.ObjectId,
+      ref: 'Client',
+      default: null,
+    },
 
     members: [
       {

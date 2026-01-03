@@ -15,7 +15,7 @@ const router = express.Router();
 router.get(
   '/',
   protect,
-  restrictTo('loan_officer', 'approver_admin', 'initiator_admin', 'super_admin'),
+  restrictTo('loan_officer', 'admin', 'super_admin'),
   listPendingAssessments
 );
 
@@ -26,7 +26,7 @@ router.get('/mine', protect, listMyAssessments);
 router.get(
   '/:loanId',
   protect,
-  restrictTo('loan_officer', 'approver_admin', 'initiator_admin', 'super_admin'),
+  restrictTo('loan_officer', 'admin', 'super_admin'),
   getAssessmentByLoan
 );
 
@@ -41,7 +41,7 @@ router.post(
 router.post(
   '/quick',
   protect,
-  restrictTo('approver_admin', 'initiator_admin', 'super_admin'),
+  restrictTo('admin', 'super_admin'),
   submitQuickAssessment
 );
 

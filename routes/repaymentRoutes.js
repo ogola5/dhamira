@@ -25,8 +25,7 @@ router.get(
   protect,
   restrictTo(
     'super_admin',
-    'initiator_admin',
-    'approver_admin',
+    'admin',
     'loan_officer'
   ),
   getRepaymentHistory
@@ -42,8 +41,7 @@ router.post(
   protect,
   restrictTo(
     'super_admin',
-    'initiator_admin',
-    'approver_admin',
+    'admin',
     'loan_officer'
   ),
   createRepayment
@@ -55,8 +53,7 @@ router.get(
   protect,
   restrictTo(
     'super_admin',
-    'initiator_admin',
-    'approver_admin',
+    'admin',
     'loan_officer'
   ),
   getRepaymentHistory

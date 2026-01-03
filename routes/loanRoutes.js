@@ -43,17 +43,17 @@ router.get(
 router.get(
   '/',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   getLoans
 );
 
 /**
- * INITIATE LOAN
+ * INITIATE LOAN (LOAN OFFICER ONLY - MAKER)
  */
 router.post(
   '/initiate',
   protect,
-  restrictTo('initiator_admin', 'super_admin'),
+  restrictTo('loan_officer'),
   initiateLoan
 );
 
@@ -63,17 +63,17 @@ router.post(
 router.get(
   '/group-preflight/:id',
   protect,
-  restrictTo('initiator_admin', 'super_admin'),
+  restrictTo('loan_officer', 'admin'),
   groupPreflight
 );
 
 /**
- * APPROVE LOAN
+ * APPROVE LOAN (ADMIN ONLY - CHECKER)
  */
 router.put(
   '/:id/approve',
   protect,
-  restrictTo('approver_admin', 'super_admin'),
+  restrictTo('admin'),
   approveLoan
 );
 
@@ -83,25 +83,25 @@ router.put(
 router.put(
   '/:id/cancel',
   protect,
-  restrictTo('initiator_admin', 'super_admin'),
+  restrictTo('admin', 'super_admin'),
   cancelLoan
 );
 
 /**
- * DISBURSE LOAN
+ * DISBURSE LOAN (ADMIN ONLY - CHECKER)
  */
 router.put(
   '/:id/disburse',
   protect,
-  restrictTo('approver_admin', 'super_admin'),
+  restrictTo('admin'),
   disburseLoan
 );
 
 // Mark application fee paid for a loan
-router.put('/:id/mark-application-fee-paid', protect, restrictTo('initiator_admin', 'approver_admin', 'super_admin'), markApplicationFeePaid);
+router.put('/:id/mark-application-fee-paid', protect, restrictTo('admin'), markApplicationFeePaid);
 
 // Bulk mark application fees paid
-router.post('/mark-application-fee-paid-bulk', protect, restrictTo('initiator_admin', 'approver_admin', 'super_admin'), markApplicationFeePaidBulk);
+router.post('/mark-application-fee-paid-bulk', protect, restrictTo('admin'), markApplicationFeePaidBulk);
 
 /**
  * LOAN DETAIL
@@ -109,7 +109,7 @@ router.post('/mark-application-fee-paid-bulk', protect, restrictTo('initiator_ad
 router.get(
   '/:id',
   protect,
-  restrictTo('super_admin', 'initiator_admin', 'approver_admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer'),
   // lazy import to avoid circular issues
   async (req, res, next) => {
     const { getLoanDetail } = await import('../controllers/loanController.js');
