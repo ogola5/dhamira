@@ -11,7 +11,7 @@ const repaymentSchema = new Schema(
 
     paymentMethod: { type: String, enum: ['mpesa', 'cash', 'bank_transfer'], default: 'mpesa' },
 
-    transactionId: { type: String, index: true, sparse: true },
+    transactionId: { type: String },
 
     paidBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
 

@@ -13,7 +13,7 @@ const guarantorSchema = new Schema(
 
     // External guarantor information (optional when clientId is present)
     guarantorName: { type: String, trim: true },
-    guarantorNationalId: { type: String, trim: true, index: true },
+    guarantorNationalId: { type: String, trim: true },
     guarantorPhone: { type: String, trim: true },
 
     relationship: { type: String, required: false, trim: true, default: 'unknown' },

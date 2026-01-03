@@ -53,7 +53,8 @@ app.use(
       // Allow requests with no origin (e.g., server-to-server, Postman)
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error('CORS policy: origin not allowed'));
+      // Return false instead of error to allow OPTIONS preflight
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],

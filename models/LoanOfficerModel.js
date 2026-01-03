@@ -8,7 +8,7 @@ const loanOfficerSchema = new Schema(
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
     email: { type: String, required: true, trim: true, index: true },
-    nationalId: { type: String, required: true, trim: true, index: true },
+    nationalId: { type: String, required: true, trim: true },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }
