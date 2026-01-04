@@ -4,7 +4,6 @@ import mongoose from 'mongoose';
 import Loan from '../models/LoanModel.js';
 import Client from '../models/ClientModel.js';
 import Group from '../models/GroupModel.js';
-import Guarantor from '../models/GuarantorModel.js';
 import CreditAssessment from '../models/CreditAssessmentModel.js';
 import Repayment from '../models/RepaymentModel.js';
 import RepaymentSchedule from '../models/RepaymentScheduleModel.js';
@@ -27,105 +26,6 @@ async function computeCycleForClient(clientId, product) {
   if (product === 'fafa') return Math.min(next, 3);
   if (product === 'business') return Math.min(next, 4);
   return next;
-}
-
-// Normalize guarantors input into an array of guarantor objects/strings.
-function normalizeGuarantors(input) {
-  if (!input) return [];
-  if (Array.isArray(input)) return input;
-  if (typeof input === 'string') return [input];
-  if (typeof input === 'object') {
-    // If object with numeric keys {0: {...}, 1: {...}}
-    const keys = Object.keys(input);
-    const numeric = keys.every(k => String(Number(k)) === k);
-    if (numeric) return keys.sort((a,b) => Number(a)-Number(b)).map(k => input[k]);
-    // If object already shaped like { guarantor0: {...}, guarantor1: {...} }
-    const vals = keys.map(k => input[k]).filter(v => v !== undefined && v !== null);
-    if (vals.length > 0) return vals;
-  }
-  return [];
-}
-
-// Helper: normalize guarantor input (accepts string or object) and create Guarantor
-async function createGuarantorEntry(loanId, g, initiatedBy) {
-  // g may be a string (nationalId) or an object
-  const rawNationalId = typeof g === 'string' ? String(g).trim() : (g.clientNationalId || g.nationalId || '').trim();
-  const name = typeof g === 'object' ? g.name || null : null;
-  const phone = typeof g === 'object' ? g.phone || null : null;
-  const relationship = typeof g === 'object' ? (g.relationship || 'unknown') : 'unknown';
-
-  // Try to resolve to an existing client using several fallbacks:
-  // 1. explicit `clientId` supplied in payload
-  // 2. `nationalId` provided
-  // 3. `phone` match
-  let guarantorClient = null;
-
-  if (typeof g === 'object' && g.clientId && mongoose.Types.ObjectId.isValid(String(g.clientId))) {
-    guarantorClient = await Client.findById(String(g.clientId));
-  }
-
-  if (!guarantorClient && rawNationalId) {
-    guarantorClient = await Client.findOne({ nationalId: String(rawNationalId).trim() });
-  }
-
-  if (!guarantorClient && phone) {
-    guarantorClient = await Client.findOne({ phone: String(phone).trim() });
-  }
-
-  if (guarantorClient) {
-    // Create guarantor linked to existing client
-    try {
-      return await Guarantor.create({
-        loanId,
-        clientId: guarantorClient._id,
-        relationship,
-        external: false,
-        idCopyUrl: (g && g.idCopyUrl) || '/uploads/placeholder-id.jpg',
-        photoUrl: (g && g.photoUrl) || '/uploads/placeholder-client.jpg',
-        eligibility: { hasRepaidFafaBefore: !!(g && g.hasRepaidFafaBefore) },
-      });
-    } catch (e) {
-      if (e && e.code === 11000) {
-        const existing = await Guarantor.findOne({ loanId, clientId: guarantorClient._id });
-        if (existing) return existing;
-      }
-      throw e;
-    }
-  }
-
-  // External guarantor: store provided identifying fields (no clientId)
-  try {
-    return await Guarantor.create({
-      loanId,
-      clientId: null,
-      guarantorName: name || null,
-      guarantorNationalId: rawNationalId || null,
-      guarantorPhone: phone || null,
-      relationship,
-      external: true,
-      idCopyUrl: (g && g.idCopyUrl) || null,
-      photoUrl: (g && g.photoUrl) || null,
-      eligibility: { hasRepaidFafaBefore: !!(g && g.hasRepaidFafaBefore) },
-    });
-  } catch (e) {
-    // Handle duplicate-key races gracefully: return the existing guarantor
-    if (e && e.code === 11000) {
-      // Prefer lookup by national id when available
-      const byNational = rawNationalId ? await Guarantor.findOne({ loanId, guarantorNationalId: rawNationalId }) : null;
-      if (byNational) return byNational;
-      // Fallback to name match
-      if (name) {
-        const byName = await Guarantor.findOne({ loanId, guarantorName: name });
-        if (byName) return byName;
-      }
-      // As a last resort try to find any guarantor for this loan with same phone
-      if (phone) {
-        const byPhone = await Guarantor.findOne({ loanId, guarantorPhone: phone });
-        if (byPhone) return byPhone;
-      }
-    }
-    throw e;
-  }
 }
 
 /* =============================
@@ -218,18 +118,7 @@ export const initiateLoan = asyncHandler(async (req, res) => {
           initiatedBy: req.user._id,
         });
 
-            // Attach guarantors for this loan if provided (optional for group flow)
-            const groupGuarantors = normalizeGuarantors(req.body.guarantors);
-            console.log('Group initiation - received guarantors:', groupGuarantors.length);
-            if (groupGuarantors.length > 0) {
-              for (const g of groupGuarantors) {
-                try {
-                  await createGuarantorEntry(loan._id, g, req.user._id);
-                } catch (e) {
-                  // continue on guarantor creation errors
-                }
-              }
-            }
+            // Guarantors removed as credit assessment requirement
 
         results.created.push({ clientId: client._id, loanId: loan._id, application_fee_cents: loan.application_fee_cents });
       } catch (err) {
@@ -310,34 +199,12 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     interestRatePercent: req.body.interestRatePercent || null,
     initiatedBy: req.user._id,
   });
-  // Create guarantors (required: at least 3 for business loans, optional for FAFA)
-  const guarantors = normalizeGuarantors(req.body.guarantors);
-  console.log('Client initiation - received guarantors:', guarantors.length, guarantors);
-  if (productVal === 'business' && (!Array.isArray(guarantors) || guarantors.length < 3)) {
-    res.status(400);
-    throw new Error('At least 3 guarantors are required for business loan application');
-  }
-
-  const createdGuarantors = [];
-  const guarantorErrors = [];
-  for (const g of guarantors) {
-    try {
-      const gu = await createGuarantorEntry(loan._id, g, req.user._id);
-      createdGuarantors.push(gu);
-    } catch (e) {
-      // Log and collect errors, but do not fail the entire loan creation
-      console.error('Guarantor creation error:', e.message || e);
-      guarantorErrors.push(e.message || String(e));
-    }
-  }
-
+  // Guarantors removed as credit assessment requirement
   const response = {
     message: 'Loan initiated',
     loan,
     application_fee_cents: loan.application_fee_cents,
-    guarantors: createdGuarantors,
   };
-  if (guarantorErrors.length > 0) response.guarantorErrors = guarantorErrors;
 
   res.status(201).json(response);
 });
@@ -380,14 +247,7 @@ export const approveLoan = asyncHandler(async (req, res) => {
     throw new Error('Credit assessment required');
   }
 
-  // Check that business loans have at least 3 guarantors (FAFA loans don't require guarantors)
-  if (loan.product === 'business') {
-    const guarantorCount = await Guarantor.countDocuments({ loanId: loan._id });
-    if (guarantorCount < 3) {
-      res.status(400);
-      throw new Error('At least 3 guarantors required for business loan approval');
-    }
-  }
+  // Guarantors removed as credit assessment requirement
 
   loan.approvedBy.push(req.user._id);
   loan.approvedAt = new Date();
@@ -688,7 +548,7 @@ export const trackMyLoans = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/loans/:id
- * Returns detailed loan information including guarantors, repayment schedule,
+ * Returns detailed loan information including repayment schedule,
  * repayment history, computed progress, outstanding, and allowed actions
  */
 export const getLoanDetail = asyncHandler(async (req, res) => {
@@ -709,9 +569,6 @@ export const getLoanDetail = asyncHandler(async (req, res) => {
     res.status(404);
     throw new Error('Loan not found');
   }
-
-  // Guarantors
-  const guarantors = await Guarantor.find({ loanId: loan._id }).lean();
 
   // Credit Assessment
   const creditAssessment = await CreditAssessment.findOne({ loanId: loan._id }).lean();
@@ -754,7 +611,6 @@ export const getLoanDetail = asyncHandler(async (req, res) => {
 
   res.json({
     loan,
-    guarantors,
     creditAssessment,
     hasCreditAssessment: !!creditAssessment,
     schedules,
