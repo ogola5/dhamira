@@ -5,6 +5,59 @@ import Client from '../models/ClientModel.js';
 import Group from '../models/GroupModel.js';
 import Loan from '../models/LoanModel.js';
 import Transaction from '../models/TransactionModel.js';
+import LoanOfficer from '../models/LoanOfficerModel.js';
+
+/**
+ * Helper function to enrich loan officer data with profile
+ */
+async function enrichLoanOfficerData(doc) {
+  if (!doc) return doc;
+  
+  // Handle array of documents
+  if (Array.isArray(doc)) {
+    const loanOfficerIds = doc
+      .map(d => d.loanOfficer?._id)
+      .filter(Boolean);
+    
+    const profiles = await LoanOfficer.find({ userId: { $in: loanOfficerIds } })
+      .select('userId name phone email')
+      .lean();
+    
+    const profileMap = profiles.reduce((acc, p) => {
+      acc[String(p.userId)] = p;
+      return acc;
+    }, {});
+    
+    return doc.map(d => {
+      const plainDoc = d.toObject ? d.toObject() : d;
+      if (plainDoc.loanOfficer?._id) {
+        const profile = profileMap[String(plainDoc.loanOfficer._id)];
+        if (profile) {
+          plainDoc.loanOfficer.name = profile.name;
+          plainDoc.loanOfficer.phone = profile.phone;
+          plainDoc.loanOfficer.email = profile.email;
+        }
+      }
+      return plainDoc;
+    });
+  }
+  
+  // Handle single document
+  const plainDoc = doc.toObject ? doc.toObject() : doc;
+  if (plainDoc.loanOfficer?._id) {
+    const profile = await LoanOfficer.findOne({ userId: plainDoc.loanOfficer._id })
+      .select('name phone email')
+      .lean();
+    
+    if (profile) {
+      plainDoc.loanOfficer.name = profile.name;
+      plainDoc.loanOfficer.phone = profile.phone;
+      plainDoc.loanOfficer.email = profile.email;
+    }
+  }
+  
+  return plainDoc;
+}
 
 /**
  * ============================
@@ -23,6 +76,12 @@ export const onboardClient = asyncHandler(async (req, res) => {
     nextOfKin,
     groupId,
     branchId,
+    residenceType,
+    photoUrl,
+    registrationDate,
+    registrationFeePaid,
+    initialSavingsPaid,
+    savings_balance_cents,
   } = req.body;
 
   // Validate required fields including branchId and groupId
@@ -68,7 +127,8 @@ export const onboardClient = asyncHandler(async (req, res) => {
     throw new Error('Client already exists');
   }
 
-  const client = await Client.create({
+  // Prepare client data with all provided fields
+  const clientData = {
     name: name.trim(),
     nationalId: nationalId.trim(),
     phone: phone.trim(),
@@ -78,14 +138,37 @@ export const onboardClient = asyncHandler(async (req, res) => {
     createdBy: req.user._id,
     businessType: businessType.trim(),
     businessLocation: businessLocation.trim(),
-    nextOfKin,
     status: 'pending',
     source: 'system',
-  });
+  };
+
+  // Add optional fields if provided
+  if (nextOfKin) clientData.nextOfKin = nextOfKin;
+  if (residenceType) clientData.residenceType = residenceType;
+  if (photoUrl) clientData.photoUrl = photoUrl;
+  if (registrationDate) clientData.registrationDate = registrationDate;
+  if (typeof registrationFeePaid === 'boolean') clientData.registrationFeePaid = registrationFeePaid;
+  if (typeof initialSavingsPaid === 'boolean') clientData.initialSavingsPaid = initialSavingsPaid;
+  if (typeof savings_balance_cents === 'number' && savings_balance_cents >= 0) {
+    clientData.savings_balance_cents = savings_balance_cents;
+  }
+
+  const client = await Client.create(clientData);
+
+  // Populate fields for response
+  await client.populate([
+    { path: 'groupId', select: 'name status' },
+    { path: 'branchId', select: 'name code' },
+    { path: 'loanOfficer', select: 'username role' },
+    { path: 'createdBy', select: 'username role' }
+  ]);
+
+  // Enrich with loan officer profile data
+  const enrichedClient = await enrichLoanOfficerData(client);
 
   res.status(201).json({
     message: 'Client onboarded and pending approval',
-    client,
+    client: enrichedClient,
   });
 });
 
@@ -203,12 +286,15 @@ export const getClients = asyncHandler(async (req, res) => {
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
+  // Enrich with loan officer profile data
+  const enrichedClients = await enrichLoanOfficerData(clients);
+
   res.json({
     page,
     limit,
     total,
     totalPages,
-    data: clients,
+    data: enrichedClients,
   });
 });
 
@@ -297,7 +383,10 @@ export const getClientById = asyncHandler(async (req, res) => {
     throw new Error('Not allowed');
   }
 
-  res.json(client);
+  // Enrich with loan officer profile data
+  const enrichedClient = await enrichLoanOfficerData(client);
+
+  res.json(enrichedClient);
 });
 
 /**
@@ -375,7 +464,14 @@ export const updateClient = asyncHandler(async (req, res) => {
       'businessLocation',
       'nextOfKin',
       'residenceType',
+      'photoUrl',
+      'registrationDate',
     ];
+
+    // Allow editing structural fields only if client has no loans
+    if (!hasLoans) {
+      allowed.push('groupId', 'loanOfficer', 'branchId', 'nationalId');
+    }
 
     allowed.forEach(field => {
       if (req.body[field] !== undefined) {
@@ -416,7 +512,10 @@ export const updateClient = asyncHandler(async (req, res) => {
     { path: 'approvedBy', select: 'username role' }
   ]);
   
-  res.json({ message: 'Client updated', client });
+  // Enrich with loan officer profile data
+  const enrichedClient = await enrichLoanOfficerData(client);
+  
+  res.json({ message: 'Client updated', client: enrichedClient });
 });
 
 /**

@@ -54,6 +54,15 @@ router.post(
   onboardClient
 );
 
+// Alias route for frontend compatibility
+router.post(
+  '/onboard',
+  protect,
+  restrictTo('loan_officer'),
+  upload.single('photo'),
+  onboardClient
+);
+
 /**
  * ADD SAVINGS (admin action only)
  */

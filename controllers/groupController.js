@@ -4,6 +4,59 @@ import mongoose from 'mongoose';
 import Group from '../models/GroupModel.js';
 import Loan from '../models/LoanModel.js';
 import Client from '../models/ClientModel.js';
+import LoanOfficer from '../models/LoanOfficerModel.js';
+
+/**
+ * Helper function to enrich loan officer data with profile
+ */
+async function enrichLoanOfficerData(doc) {
+  if (!doc) return doc;
+  
+  // Handle array of documents
+  if (Array.isArray(doc)) {
+    const loanOfficerIds = doc
+      .map(d => d.loanOfficer?._id)
+      .filter(Boolean);
+    
+    const profiles = await LoanOfficer.find({ userId: { $in: loanOfficerIds } })
+      .select('userId name phone email')
+      .lean();
+    
+    const profileMap = profiles.reduce((acc, p) => {
+      acc[String(p.userId)] = p;
+      return acc;
+    }, {});
+    
+    return doc.map(d => {
+      const plainDoc = d.toObject ? d.toObject() : d;
+      if (plainDoc.loanOfficer?._id) {
+        const profile = profileMap[String(plainDoc.loanOfficer._id)];
+        if (profile) {
+          plainDoc.loanOfficer.name = profile.name;
+          plainDoc.loanOfficer.phone = profile.phone;
+          plainDoc.loanOfficer.email = profile.email;
+        }
+      }
+      return plainDoc;
+    });
+  }
+  
+  // Handle single document
+  const plainDoc = doc.toObject ? doc.toObject() : doc;
+  if (plainDoc.loanOfficer?._id) {
+    const profile = await LoanOfficer.findOne({ userId: plainDoc.loanOfficer._id })
+      .select('name phone email')
+      .lean();
+    
+    if (profile) {
+      plainDoc.loanOfficer.name = profile.name;
+      plainDoc.loanOfficer.phone = profile.phone;
+      plainDoc.loanOfficer.email = profile.email;
+    }
+  }
+  
+  return plainDoc;
+}
 
 /**
  * ============================
@@ -13,7 +66,7 @@ import Client from '../models/ClientModel.js';
  * Status: pending
  */
 export const createGroup = asyncHandler(async (req, res) => {
-  const { name, meetingDay, meetingTime, branchId } = req.body;
+  const { name, meetingDay, meetingTime, branchId, members, signatories, chairperson, secretary, treasurer } = req.body;
 
   if (!name) {
     res.status(400);
@@ -46,7 +99,8 @@ export const createGroup = asyncHandler(async (req, res) => {
     throw new Error('Group name already exists');
   }
 
-  const group = await Group.create({
+  // Prepare group data
+  const groupData = {
     name: name.trim(),
     branchId: finalBranchId,
     loanOfficer: req.user._id,
@@ -55,11 +109,61 @@ export const createGroup = asyncHandler(async (req, res) => {
     meetingTime: meetingTime || null,
     status: 'pending',
     source: 'system',
-  });
+  };
+
+  // Add members if provided
+  if (members && Array.isArray(members) && members.length > 0) {
+    groupData.members = members;
+  }
+
+  // Handle signatories in array format
+  if (signatories && Array.isArray(signatories) && signatories.length > 0) {
+    groupData.signatories = signatories;
+    
+    // Sync individual signatory fields
+    signatories.forEach(sig => {
+      if (sig.role === 'chairperson' && sig.clientId) groupData.chairperson = sig.clientId;
+      if (sig.role === 'secretary' && sig.clientId) groupData.secretary = sig.clientId;
+      if (sig.role === 'treasurer' && sig.clientId) groupData.treasurer = sig.clientId;
+    });
+  }
+
+  // Handle signatories in flat format (individual fields)
+  if (chairperson || secretary || treasurer) {
+    groupData.chairperson = chairperson || null;
+    groupData.secretary = secretary || null;
+    groupData.treasurer = treasurer || null;
+    
+    // Build signatories array if all three are provided
+    if (chairperson && secretary && treasurer) {
+      groupData.signatories = [
+        { role: 'chairperson', clientId: chairperson },
+        { role: 'secretary', clientId: secretary },
+        { role: 'treasurer', clientId: treasurer }
+      ];
+    }
+  }
+
+  const group = await Group.create(groupData);
+
+  // Populate fields for response
+  await group.populate([
+    { path: 'branchId', select: 'name code' },
+    { path: 'loanOfficer', select: 'username' },
+    { path: 'createdBy', select: 'username' },
+    { path: 'members', select: 'name nationalId' },
+    { path: 'signatories.clientId', select: 'name nationalId' },
+    { path: 'chairperson', select: 'name nationalId' },
+    { path: 'secretary', select: 'name nationalId' },
+    { path: 'treasurer', select: 'name nationalId' }
+  ]);
+
+  // Enrich with loan officer profile data
+  const enrichedGroup = await enrichLoanOfficerData(group);
 
   res.status(201).json({
     message: 'Group created and pending approval',
-    group,
+    group: enrichedGroup,
   });
 });
 
@@ -295,10 +399,18 @@ export const updateGroup = asyncHandler(async (req, res) => {
       });
     }
 
-    // Loan officers can only update safe fields
+    // Loan officers can update these fields
     if (req.body.name !== undefined) group.name = req.body.name;
     if (req.body.meetingDay !== undefined) group.meetingDay = req.body.meetingDay;
     if (req.body.meetingTime !== undefined) group.meetingTime = req.body.meetingTime;
+    
+    // Allow updating members and structural fields if no loans exist
+    if (!hasLoans) {
+      if (req.body.members !== undefined && Array.isArray(req.body.members)) {
+        group.members = req.body.members;
+      }
+      if (req.body.branchId !== undefined) group.branchId = req.body.branchId;
+    }
   }
 
   // Auto-activate legacy groups when all required fields are filled
@@ -318,7 +430,24 @@ export const updateGroup = asyncHandler(async (req, res) => {
   }
 
   await group.save();
-  res.json({ message: 'Group updated', group });
+  
+  // Populate fields for response
+  await group.populate([
+    { path: 'branchId', select: 'name code' },
+    { path: 'loanOfficer', select: 'username' },
+    { path: 'createdBy', select: 'username' },
+    { path: 'approvedBy', select: 'username' },
+    { path: 'members', select: 'name nationalId' },
+    { path: 'signatories.clientId', select: 'name nationalId' },
+    { path: 'chairperson', select: 'name nationalId' },
+    { path: 'secretary', select: 'name nationalId' },
+    { path: 'treasurer', select: 'name nationalId' }
+  ]);
+  
+  // Enrich with loan officer profile data
+  const enrichedGroup = await enrichLoanOfficerData(group);
+  
+  res.json({ message: 'Group updated', group: enrichedGroup });
 });
 
 /**
@@ -376,7 +505,10 @@ export const getGroups = asyncHandler(async (req, res) => {
   const [total, groups] = await Promise.all([
     Group.countDocuments(filter),
     Group.find(filter)
+      .populate('branchId', 'name code')
       .populate('loanOfficer', 'username')
+      .populate('createdBy', 'username')
+      .populate('approvedBy', 'username')
       .populate('members', 'name nationalId')
       .populate('signatories.clientId', 'name nationalId')
       .populate('chairperson', 'name nationalId')
@@ -387,7 +519,10 @@ export const getGroups = asyncHandler(async (req, res) => {
       .limit(limit),
   ]);
 
-  res.json({ page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), data: groups });
+  // Enrich with loan officer profile data
+  const enrichedGroups = await enrichLoanOfficerData(groups);
+
+  res.json({ page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)), data: enrichedGroups });
 });
 
 /**
@@ -402,7 +537,10 @@ export const getGroupById = asyncHandler(async (req, res) => {
   }
 
   const group = await Group.findById(req.params.id)
+    .populate('branchId', 'name code')
     .populate('loanOfficer', 'username')
+    .populate('createdBy', 'username')
+    .populate('approvedBy', 'username')
     .populate('members', 'name nationalId')
     .populate('signatories.clientId', 'name nationalId')
     .populate('chairperson', 'name nationalId')
@@ -422,5 +560,8 @@ export const getGroupById = asyncHandler(async (req, res) => {
     throw new Error('Not allowed');
   }
 
-  res.json(group);
+  // Enrich with loan officer profile data
+  const enrichedGroup = await enrichLoanOfficerData(group);
+
+  res.json(enrichedGroup);
 });

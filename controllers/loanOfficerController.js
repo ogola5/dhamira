@@ -6,14 +6,14 @@ import Group from '../models/GroupModel.js';
 import Client from '../models/ClientModel.js';
 
 // POST /api/loan-officers
-// Body: { name, phone, email, nationalId }
+// Body: { name, phone, email, nationalId, branchId }
 // Access: super_admin only
 const createLoanOfficer = asyncHandler(async (req, res) => {
-  const { name, phone, email, nationalId } = req.body;
+  const { name, phone, email, nationalId, branchId } = req.body;
 
-  if (!name || !phone || !email || !nationalId) {
+  if (!name || !phone || !email || !nationalId || !branchId) {
     res.status(400);
-    throw new Error('name, phone, email and nationalId are required');
+    throw new Error('name, phone, email, nationalId and branchId are required');
   }
 
   // Prevent duplicates by nationalId or email/username
@@ -33,6 +33,7 @@ const createLoanOfficer = asyncHandler(async (req, res) => {
     nationalId: String(nationalId).trim(),
     phone: String(phone).trim(),
     role: 'loan_officer',
+    branchId,
     regions: [],
   });
 
