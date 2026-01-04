@@ -21,8 +21,7 @@ const generateNumeric = (len = 9) => {
 
 const rolesToSeed = [
   { role: 'super_admin', prefix: 'SEED_SUPERADMIN' },
-  { role: 'initiator_admin', prefix: 'SEED_INITIATOR_ADMIN' },
-  { role: 'approver_admin', prefix: 'SEED_APPROVER_ADMIN' },
+  { role: 'admin', prefix: 'SEED_ADMIN' },
   { role: 'loan_officer', prefix: 'SEED_LOAN_OFFICER' },
   { role: 'accountant', prefix: 'SEED_ACCOUNTANT', fixedId: '388626', fixedPassword: 'accountant1' },
 ];
