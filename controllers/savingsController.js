@@ -18,7 +18,7 @@ const createSavings = asyncHandler(async (req, res) => {
   }
 
   // Authorization: admins can manage any client, loan officers only their own
-  if (!['approver_admin', 'super_admin', 'loan_officer'].includes(req.user.role)) {
+  if (!['approver_admin', 'super_admin', 'loan_officer', 'accountant'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Not allowed');
   }
@@ -75,7 +75,7 @@ const createSavings = asyncHandler(async (req, res) => {
 
 const listSavings = asyncHandler(async (req, res) => {
   // Authorization: admins see all, loan officers see only their clients
-  if (!['approver_admin', 'super_admin', 'loan_officer'].includes(req.user.role)) {
+  if (!['approver_admin', 'super_admin', 'loan_officer', 'accountant'].includes(req.user.role)) {
     res.status(403);
     throw new Error('Not allowed');
   }

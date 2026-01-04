@@ -39,6 +39,7 @@ const userSchema = new Schema(
         'super_admin',
         'admin',
         'loan_officer',
+        'accountant',
       ],
       required: true,
       index: true,
@@ -51,7 +52,7 @@ const userSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: 'Branch',
       required: function() {
-        return this.role === 'loan_officer' || this.role === 'admin';
+        return this.role === 'loan_officer' || this.role === 'admin' || this.role === 'accountant';
       },
       index: true,
     },

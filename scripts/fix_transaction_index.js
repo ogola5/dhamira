@@ -26,13 +26,13 @@ async function run() {
       console.log('No legacy compound index found');
     }
 
-    // Create partial unique index ensuring uniqueness only when mpesaReceipt exists and not null
+    // Create partial unique index ensuring uniqueness only when mpesaReceipt exists and is a string
     console.log('Creating partial unique index on {type:1, mpesaReceipt:1}');
     await coll.createIndex(
       { type: 1, mpesaReceipt: 1 },
       {
         unique: true,
-        partialFilterExpression: { mpesaReceipt: { $exists: true, $ne: null } },
+        partialFilterExpression: { mpesaReceipt: { $type: 'string' } },
         background: false,
       }
     );

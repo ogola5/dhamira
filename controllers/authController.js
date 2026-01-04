@@ -24,8 +24,12 @@ const login = asyncHandler(async (req, res) => {
     throw new Error('Username and password required');
   }
 
+  // Allow login with either username or nationalId
   const user = await userModel.findOne({
-    username: username.trim(),
+    $or: [
+      { username: username.trim() },
+      { nationalId: username.trim() }
+    ]
   });
 
   if (!user || user.status !== 'active') {
@@ -69,17 +73,18 @@ const register = asyncHandler(async (req, res) => {
   const allowedRoles = [
     'admin',
     'loan_officer',
+    'accountant',
   ];
 
   if (!allowedRoles.includes(role)) {
     res.status(400);
-    throw new Error('Invalid role assignment. Allowed roles: admin, loan_officer');
+    throw new Error('Invalid role assignment. Allowed roles: admin, loan_officer, accountant');
   }
 
-  // Validate branchId is required for admin and loan_officer
-  if ((role === 'admin' || role === 'loan_officer') && !branchId) {
+  // Validate branchId is required for admin, loan_officer, and accountant
+  if ((role === 'admin' || role === 'loan_officer' || role === 'accountant') && !branchId) {
     res.status(400);
-    throw new Error('Branch ID is required for admin and loan_officer roles');
+    throw new Error('Branch ID is required for admin, loan_officer, and accountant roles');
   }
 
   // Verify branch exists

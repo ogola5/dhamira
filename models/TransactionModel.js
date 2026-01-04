@@ -89,8 +89,8 @@ transactionSchema.index(
   { type: 1, mpesaReceipt: 1 },
   {
     unique: true,
-    // Only enforce uniqueness when mpesaReceipt is present and not null
-    partialFilterExpression: { mpesaReceipt: { $exists: true, $ne: null } },
+    // Only enforce uniqueness when mpesaReceipt is a string
+    partialFilterExpression: { mpesaReceipt: { $type: 'string' } },
   }
 );
 
@@ -98,8 +98,8 @@ transactionSchema.index(
   { type: 1, idempotencyKey: 1 },
   {
     unique: true,
-    // Only enforce uniqueness when idempotencyKey is present and not null
-    partialFilterExpression: { idempotencyKey: { $exists: true, $ne: null } },
+    // Only enforce uniqueness when idempotencyKey is a string
+    partialFilterExpression: { idempotencyKey: { $type: 'string' } },
   }
 );
 

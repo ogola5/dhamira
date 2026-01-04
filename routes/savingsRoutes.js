@@ -4,7 +4,7 @@ import { protect, restrictTo } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
-router.post('/', protect, restrictTo('admin', 'super_admin', 'loan_officer'), createSavings);
-router.get('/', protect, restrictTo('admin', 'super_admin', 'loan_officer'), listSavings);
+router.post('/', protect, restrictTo('admin', 'super_admin', 'loan_officer', 'accountant'), createSavings);
+router.get('/', protect, restrictTo('admin', 'super_admin', 'loan_officer', 'accountant'), listSavings);
 
 export default router;

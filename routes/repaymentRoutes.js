@@ -26,7 +26,8 @@ router.get(
   restrictTo(
     'super_admin',
     'admin',
-    'loan_officer'
+    'loan_officer',
+    'accountant'
   ),
   getRepaymentHistory
 );
@@ -42,7 +43,8 @@ router.post(
   restrictTo(
     'super_admin',
     'admin',
-    'loan_officer'
+    'loan_officer',
+    'accountant'
   ),
   createRepayment
 );
@@ -54,7 +56,8 @@ router.get(
   restrictTo(
     'super_admin',
     'admin',
-    'loan_officer'
+    'loan_officer',
+    'accountant'
   ),
   getRepaymentHistory
 );

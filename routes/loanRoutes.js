@@ -43,7 +43,7 @@ router.get(
 router.get(
   '/',
   protect,
-  restrictTo('super_admin', 'admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer', 'accountant'),
   getLoans
 );
 

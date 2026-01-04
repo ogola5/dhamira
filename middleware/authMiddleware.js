@@ -14,9 +14,10 @@ export const ROLE_GROUPS = {
   SUPER_ADMIN: ['super_admin'],
   ADMINS: ['admin'],
   LOAN_OFFICERS: ['loan_officer'],
+  ACCOUNTANTS: ['accountant'],
   MAKERS: ['loan_officer'],
   CHECKERS: ['admin'],
-  ALL_INTERNAL: ['super_admin', 'admin', 'loan_officer'],
+  ALL_INTERNAL: ['super_admin', 'admin', 'loan_officer', 'accountant'],
 };
 
 // Protect routes (attach user context)

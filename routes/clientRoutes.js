@@ -25,7 +25,7 @@ const router = express.Router();
 router.get(
   '/search',
   protect,
-  restrictTo('super_admin', 'admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer', 'accountant'),
   searchClients
 );
 
@@ -37,7 +37,7 @@ router.get(
 router.get(
   '/',
   protect,
-  restrictTo('super_admin', 'admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer', 'accountant'),
   getClients
 );
 
@@ -70,7 +70,7 @@ router.post(
 router.get(
   '/:id/history',
   protect,
-  restrictTo('super_admin', 'admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer', 'accountant'),
   getClientHistory
 );
 
@@ -82,7 +82,7 @@ router.get(
 router.get(
   '/:id',
   protect,
-  restrictTo('super_admin', 'admin', 'loan_officer'),
+  restrictTo('super_admin', 'admin', 'loan_officer', 'accountant'),
   getClientById
 );
 

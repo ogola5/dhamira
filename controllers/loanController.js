@@ -310,12 +310,12 @@ export const initiateLoan = asyncHandler(async (req, res) => {
     interestRatePercent: req.body.interestRatePercent || null,
     initiatedBy: req.user._id,
   });
-  // Create guarantors (required: at least 3)
+  // Create guarantors (required: at least 3 for business loans, optional for FAFA)
   const guarantors = normalizeGuarantors(req.body.guarantors);
   console.log('Client initiation - received guarantors:', guarantors.length, guarantors);
-  if (!Array.isArray(guarantors) || guarantors.length < 3) {
+  if (productVal === 'business' && (!Array.isArray(guarantors) || guarantors.length < 3)) {
     res.status(400);
-    throw new Error('At least 3 guarantors are required for loan application');
+    throw new Error('At least 3 guarantors are required for business loan application');
   }
 
   const createdGuarantors = [];
@@ -380,11 +380,13 @@ export const approveLoan = asyncHandler(async (req, res) => {
     throw new Error('Credit assessment required');
   }
 
-  // Check that loan has at least 3 guarantors
-  const guarantorCount = await Guarantor.countDocuments({ loanId: loan._id });
-  if (guarantorCount < 3) {
-    res.status(400);
-    throw new Error('At least 3 guarantors required for loan approval');
+  // Check that business loans have at least 3 guarantors (FAFA loans don't require guarantors)
+  if (loan.product === 'business') {
+    const guarantorCount = await Guarantor.countDocuments({ loanId: loan._id });
+    if (guarantorCount < 3) {
+      res.status(400);
+      throw new Error('At least 3 guarantors required for business loan approval');
+    }
   }
 
   loan.approvedBy.push(req.user._id);
